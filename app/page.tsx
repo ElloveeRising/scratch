@@ -73,6 +73,54 @@ function mergeCards(base: Card[], saved: Partial<Card>[]): Card[] {
   });
 }
 
+function hasContent(c: Partial<Card>): boolean {
+  return Boolean(
+    (c.text && c.text.trim()) ||
+      (c.textTop && c.textTop.trim()) ||
+      c.linkUrl ||
+      c.mediaKey
+  );
+}
+
+function cardFromRemote(base: Card, r: Partial<Card>): Card {
+  const kind = r.kind ?? "text";
+  let text = r.text ?? "";
+  let linkUrl = r.linkUrl;
+  if (kind === "link" && !linkUrl) {
+    linkUrl = text;
+    text = "";
+  }
+  return {
+    ...base,
+    kind,
+    text,
+    textTop: r.textTop,
+    linkUrl,
+    mediaKey: r.mediaKey,
+    mediaName: r.mediaName,
+    mediaType: r.mediaType,
+    mediaSize: r.mediaSize,
+  };
+}
+
+// Merge remote into local per card, preferring whichever side actually has
+// content so a blank board can NEVER erase a full one. Only genuine
+// content-vs-content conflicts fall back to last-write-wins on the timestamp.
+function mergeBoards(local: Card[], remote: Partial<Card>[], localNewer: boolean): Card[] {
+  return local.map((lc) => {
+    const rc = remote.find((r) => r.id === lc.id);
+    if (!rc) return lc;
+    const lHas = hasContent(lc);
+    const rHas = hasContent(rc);
+    let takeRemote: boolean;
+    if (lHas && !rHas) takeRemote = false; // keep our content
+    else if (rHas && !lHas) takeRemote = true; // take their content
+    else if (!lHas && !rHas) takeRemote = false; // both empty
+    else takeRemote = !localNewer; // both have content → last-write-wins
+    return takeRemote ? cardFromRemote(lc, rc) : lc;
+  });
+}
+
 type SyncStatus = "local" | "offline" | "syncing" | "synced";
 
 export default function Home() {
@@ -188,12 +236,21 @@ export default function Home() {
           .maybeSingle();
         if (cancelled) return;
         if (data?.content) {
-          const remoteTime = Date.parse(data.updated_at);
-          if (remoteTime >= readLocalUpdatedAt()) applyRemote(data.content);
-          else await pushRemote(); // local is newer → upload it
-        } else {
-          await pushRemote(); // no cloud copy yet → seed it
+          let remoteCards: Partial<Card>[] = [];
+          try {
+            remoteCards =
+              (JSON.parse(data.content) as { cards?: Partial<Card>[] }).cards ?? [];
+          } catch {
+            /* ignore malformed remote */
+          }
+          const localNewer = readLocalUpdatedAt() > Date.parse(data.updated_at);
+          const merged = mergeBoards(cardsRef.current, remoteCards, localNewer);
+          cardsRef.current = merged;
+          lastSyncedRef.current = JSON.stringify(merged);
+          setCards(merged);
         }
+        // Always upload the result so the cloud holds the merged union.
+        await pushRemote();
       } catch {
         /* offline or not set up yet — local still works */
       }
