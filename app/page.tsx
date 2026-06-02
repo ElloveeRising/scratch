@@ -135,6 +135,7 @@ export default function Home() {
   const [showConnect, setShowConnect] = useState(false);
   const userIdRef = useRef<string | null>(null);
   const lastSyncedRef = useRef<string>(""); // JSON of cards last pushed/received
+  const lastSyncedAtRef = useRef<number>(0); // timestamp of last push/receive — for echo suppression
   const pushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -190,13 +191,15 @@ export default function Home() {
     const uid = userIdRef.current;
     if (!sb || !uid) return;
     const snapshot = cardsRef.current;
+    const ts = Date.now();
     lastSyncedRef.current = JSON.stringify(snapshot);
+    lastSyncedAtRef.current = ts;
     setPushing(true);
     try {
       await sb.from("buffers").upsert({
         user_id: uid,
-        content: JSON.stringify({ cards: snapshot, updatedAt: Date.now() }),
-        updated_at: new Date().toISOString(),
+        content: JSON.stringify({ cards: snapshot, updatedAt: ts }),
+        updated_at: new Date(ts).toISOString(),
       });
     } catch {
       /* stay silent — the local copy is always safe */
@@ -207,10 +210,15 @@ export default function Home() {
   // Apply a board that arrived from the cloud (another device, or first load).
   const applyRemote = useCallback((content: string) => {
     try {
-      const parsed = JSON.parse(content) as { cards?: Partial<Card>[] };
-      if (!parsed?.cards?.length) return;
-      const merged = mergeCards(cardsRef.current, parsed.cards);
+      const inc = JSON.parse(content) as { cards?: Partial<Card>[]; updatedAt?: number };
+      const incTs = typeof inc.updatedAt === "number" ? inc.updatedAt : 0;
+      // Ignore the echo of our own just-pushed change (and any stale one) so
+      // in-progress typing is never reverted by our own write coming back.
+      if (incTs <= lastSyncedAtRef.current) return;
+      const merged = mergeBoards(cardsRef.current, inc.cards ?? [], false);
+      cardsRef.current = merged;
       lastSyncedRef.current = JSON.stringify(merged);
+      lastSyncedAtRef.current = incTs;
       setCards(merged);
     } catch {
       /* ignore malformed remote content */
