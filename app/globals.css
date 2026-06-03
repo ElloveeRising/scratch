@@ -443,4 +443,24 @@
     font-size: 11px;
     color: var(--stamp-red);
   }
+  .connect-code {
+    text-align: center;
+    font-size: 22px;
+    letter-spacing: 0.4em;
+    padding: 12px;
+  }
+  .connect-resend {
+    display: block;
+    margin: 14px auto 0;
+    font-size: 11px;
+    color: var(--ink);
+    opacity: 0.55;
+    background: none;
+    border: none;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .connect-resend:hover {
+    opacity: 0.85;
+  }
 }

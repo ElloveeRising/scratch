@@ -3,15 +3,18 @@
 import { useState } from "react";
 import { supabase } from "../lib/supabase";
 
-// Minimal magic-link sign-in panel. No passwords — enter an email, get a link,
-// tap it on any device to sync that device to your board.
+// Sign-in via a 6-digit email code (with the magic link as a backup). The code
+// is far more reliable on phones: you type it into the SAME browser the app is
+// open in, so there is no "link opened in a different browser" problem and
+// nothing single-use to accidentally consume on another device.
 export default function Connect({ onClose }: { onClose: () => void }) {
   const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  async function send(e: React.FormEvent) {
+  async function sendCode(e: React.FormEvent) {
     e.preventDefault();
     const sb = supabase;
     if (!sb || !email.trim()) return;
@@ -30,6 +33,27 @@ export default function Connect({ onClose }: { onClose: () => void }) {
     setBusy(false);
   }
 
+  async function verifyCode(e: React.FormEvent) {
+    e.preventDefault();
+    const sb = supabase;
+    const token = code.replace(/\D/g, "");
+    if (!sb || !token) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const { error } = await sb.auth.verifyOtp({
+        email: email.trim(),
+        token,
+        type: "email",
+      });
+      if (error) setErr("That code did not work — check it, or send a new one.");
+      else onClose(); // signed in; the app picks up the session
+    } catch {
+      setErr("That code did not work — check it, or send a new one.");
+    }
+    setBusy(false);
+  }
+
   return (
     <div className="connect-overlay" onClick={onClose}>
       <div className="connect-panel" onClick={(e) => e.stopPropagation()}>
@@ -41,10 +65,10 @@ export default function Connect({ onClose }: { onClose: () => void }) {
           <>
             <h2 className="connect-title">SYNC ACROSS DEVICES</h2>
             <p className="connect-sub">
-              Enter your email and we will send a magic link. Open it on your
-              phone and your laptop to mirror this board between them.
+              Enter your email and we will send a 6-digit code. Do this once on
+              each device — phone and laptop — to mirror your board between them.
             </p>
-            <form onSubmit={send}>
+            <form onSubmit={sendCode}>
               <input
                 type="email"
                 required
@@ -55,20 +79,45 @@ export default function Connect({ onClose }: { onClose: () => void }) {
                 autoFocus
               />
               <button type="submit" className="scratch-btn connect-send" disabled={busy}>
-                {busy ? "SENDING…" : "SEND MAGIC LINK"}
+                {busy ? "SENDING…" : "SEND CODE"}
               </button>
             </form>
             {err && <p className="connect-err">{err}</p>}
           </>
         ) : (
           <>
-            <h2 className="connect-title">CHECK YOUR EMAIL ✉️</h2>
+            <h2 className="connect-title">ENTER YOUR CODE</h2>
             <p className="connect-sub">
-              We sent a link to <b>{email}</b>. Tap it on any device — phone or
-              laptop — to sync this board there. Check spam if it is slow.
+              We emailed a 6-digit code to <b>{email}</b>. Type it here on THIS
+              device. (Tapping the link in the same email works too.)
             </p>
-            <button type="button" className="scratch-btn" onClick={onClose}>
-              DONE
+            <form onSubmit={verifyCode}>
+              <input
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                placeholder="123456"
+                className="connect-input connect-code"
+                autoFocus
+              />
+              <button type="submit" className="scratch-btn connect-send" disabled={busy}>
+                {busy ? "CHECKING…" : "CONNECT"}
+              </button>
+            </form>
+            {err && <p className="connect-err">{err}</p>}
+            <button
+              type="button"
+              className="connect-resend"
+              onClick={() => {
+                setSent(false);
+                setCode("");
+                setErr(null);
+              }}
+            >
+              use a different email / resend
             </button>
           </>
         )}
