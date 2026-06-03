@@ -65,7 +65,7 @@ export default function Connect({ onClose }: { onClose: () => void }) {
           <>
             <h2 className="connect-title">SYNC ACROSS DEVICES</h2>
             <p className="connect-sub">
-              Enter your email and we will send a 6-digit code. Do this once on
+              Enter your email and we will send a sign-in code. Do this once on
               each device — phone and laptop — to mirror your board between them.
             </p>
             <form onSubmit={sendCode}>
@@ -88,18 +88,17 @@ export default function Connect({ onClose }: { onClose: () => void }) {
           <>
             <h2 className="connect-title">ENTER YOUR CODE</h2>
             <p className="connect-sub">
-              We emailed a 6-digit code to <b>{email}</b>. Type it here on THIS
-              device. (Tapping the link in the same email works too.)
+              We emailed a sign-in code to <b>{email}</b>. Type the whole code
+              here on THIS device. (Tapping the link in the same email works too.)
             </p>
             <form onSubmit={verifyCode}>
               <input
                 type="text"
                 inputMode="numeric"
                 autoComplete="one-time-code"
-                maxLength={6}
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
-                placeholder="123456"
+                placeholder="12345678"
                 className="connect-input connect-code"
                 autoFocus
               />
