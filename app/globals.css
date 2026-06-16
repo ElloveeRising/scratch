@@ -463,4 +463,70 @@
   .connect-resend:hover {
     opacity: 0.85;
   }
+
+  /* Inline video player */
+  .media-video {
+    max-width: 100%;
+    max-height: 100%;
+    border-radius: 2px;
+    background: #000;
+    box-shadow: 0 1px 4px rgba(18, 10, 3, 0.3);
+  }
+
+  /* Download link styled like a toolbar button */
+  .card-tools .tool-btn {
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    line-height: 1;
+    text-decoration: none;
+    color: var(--ink);
+    background: var(--manila);
+    border: 1px solid rgba(60, 45, 25, 0.5);
+    border-radius: 3px;
+    box-shadow: 1px 1px 0 rgba(18, 9, 2, 0.35);
+    cursor: pointer;
+  }
+  .card-tools .tool-btn:hover {
+    background: var(--ink);
+    color: var(--manila);
+  }
+
+  /* A file whose data has not reached this device */
+  .file-chip-missing {
+    cursor: default;
+    opacity: 0.6;
+  }
+
+  /* Quick "erase whole card" button on text cards (mirror of the + attach) */
+  .card-wipe {
+    position: absolute;
+    bottom: 8px;
+    left: 10px;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    line-height: 1;
+    color: var(--ink);
+    background: rgba(255, 255, 255, 0.15);
+    border: 1px solid rgba(60, 45, 25, 0.3);
+    border-radius: 3px;
+    opacity: 0.3;
+    cursor: pointer;
+  }
+  .card:hover .card-wipe {
+    opacity: 0.6;
+  }
+  .card-wipe:hover {
+    opacity: 1;
+    background: var(--stamp-red);
+    color: var(--manila);
+    border-color: var(--stamp-red);
+  }
 }

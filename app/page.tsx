@@ -66,6 +66,8 @@ function mergeCards(base: Card[], saved: Partial<Card>[]): Card[] {
       textTop: hit.textTop,
       linkUrl,
       mediaKey: hit.mediaKey,
+      mediaUrl: hit.mediaUrl,
+      mediaPath: hit.mediaPath,
       mediaName: hit.mediaName,
       mediaType: hit.mediaType,
       mediaSize: hit.mediaSize,
@@ -78,7 +80,8 @@ function hasContent(c: Partial<Card>): boolean {
     (c.text && c.text.trim()) ||
       (c.textTop && c.textTop.trim()) ||
       c.linkUrl ||
-      c.mediaKey
+      c.mediaKey ||
+      c.mediaUrl
   );
 }
 
@@ -97,6 +100,8 @@ function cardFromRemote(base: Card, r: Partial<Card>): Card {
     textTop: r.textTop,
     linkUrl,
     mediaKey: r.mediaKey,
+    mediaUrl: r.mediaUrl,
+    mediaPath: r.mediaPath,
     mediaName: r.mediaName,
     mediaType: r.mediaType,
     mediaSize: r.mediaSize,
@@ -316,22 +321,57 @@ export default function Home() {
   const onAttach = useCallback(async (id: string, file: File) => {
     const prevCard = cardsRef.current.find((c) => c.id === id);
     const key = newKey();
+    setPushing(true);
     try {
-      await idbPut(key, file);
+      await idbPut(key, file); // fast local copy
     } catch {
-      /* if storing fails the card still updates; it just won't render */
+      /* local store failed; the cloud upload below may still succeed */
     }
     if (prevCard?.mediaKey && prevCard.mediaKey !== key) {
       idbDel(prevCard.mediaKey).catch(() => {});
     }
+
     const isImage = file.type.startsWith("image/");
+    const isVideo = file.type.startsWith("video/");
+    const kind: "image" | "video" | "file" = isImage ? "image" : isVideo ? "video" : "file";
+
+    // Upload the actual file to cloud storage so OTHER devices can load it.
+    let mediaUrl: string | undefined;
+    let mediaPath: string | undefined;
+    const sb = supabase;
+    const uid = userIdRef.current;
+    if (sb && uid) {
+      try {
+        const ext =
+          (file.name.split(".").pop() || "bin").replace(/[^a-zA-Z0-9]/g, "").slice(0, 8) || "bin";
+        const path = `${uid}/${key}.${ext}`;
+        const { error } = await sb.storage
+          .from("media")
+          .upload(path, file, {
+            contentType: file.type || "application/octet-stream",
+            upsert: true,
+          });
+        if (!error) {
+          mediaPath = path;
+          mediaUrl = sb.storage.from("media").getPublicUrl(path).data.publicUrl;
+        }
+      } catch {
+        /* upload failed — media stays available on this device only */
+      }
+    }
+    if (prevCard?.mediaPath && prevCard.mediaPath !== mediaPath && sb) {
+      sb.storage.from("media").remove([prevCard.mediaPath]).catch(() => {});
+    }
+
     setCards((prev) =>
       prev.map((c) =>
         c.id === id
           ? {
               ...c,
-              kind: isImage ? "image" : "file",
+              kind,
               mediaKey: key,
+              mediaUrl,
+              mediaPath,
               mediaName: file.name,
               mediaType: file.type,
               mediaSize: file.size,
@@ -339,6 +379,7 @@ export default function Home() {
           : c
       )
     );
+    setPushing(false);
   }, []);
 
   const onLink = useCallback((id: string, url: string) => {
@@ -361,22 +402,25 @@ export default function Home() {
     );
   }, []);
 
-  const onClear = useCallback((id: string) => {
+  // Erase a whole card (text + media + cloud copy). Triggered with a confirm.
+  const onWipe = useCallback((id: string) => {
     const prevCard = cardsRef.current.find((c) => c.id === id);
     if (prevCard?.mediaKey) idbDel(prevCard.mediaKey).catch(() => {});
-    const recovered = [prevCard?.textTop?.trim(), prevCard?.text?.trim(), prevCard?.linkUrl]
-      .filter(Boolean)
-      .join("\n");
+    if (prevCard?.mediaPath && supabase) {
+      supabase.storage.from("media").remove([prevCard.mediaPath]).catch(() => {});
+    }
     setCards((prev) =>
       prev.map((c) =>
         c.id === id
           ? {
               ...c,
               kind: "text",
-              text: recovered,
+              text: "",
               textTop: undefined,
               linkUrl: undefined,
               mediaKey: undefined,
+              mediaUrl: undefined,
+              mediaPath: undefined,
               mediaName: undefined,
               mediaType: undefined,
               mediaSize: undefined,
@@ -445,7 +489,7 @@ export default function Home() {
             onTextTop={onTextTop}
             onAttach={onAttach}
             onLink={onLink}
-            onClear={onClear}
+            onWipe={onWipe}
           />
           {smalls.map((c) => (
             <CardView
@@ -457,7 +501,7 @@ export default function Home() {
               onTextTop={onTextTop}
               onAttach={onAttach}
               onLink={onLink}
-              onClear={onClear}
+              onWipe={onWipe}
             />
           ))}
         </div>

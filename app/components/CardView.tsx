@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { idbGet } from "../lib/idb";
 import { parseLink } from "../lib/links";
 
-export type Kind = "text" | "image" | "file" | "link";
+export type Kind = "text" | "image" | "video" | "file" | "link";
 
 export interface Card {
   id: string;
@@ -14,7 +14,9 @@ export interface Card {
   text: string; // body for text cards; bottom caption for media cards
   textTop?: string; // top note for media cards (big card only)
   linkUrl?: string; // URL for link cards
-  mediaKey?: string; // IndexedDB key for image/file blob
+  mediaKey?: string; // IndexedDB key for a local copy of the blob
+  mediaUrl?: string; // cloud URL — how OTHER devices load this media
+  mediaPath?: string; // storage path (for deletion)
   mediaName?: string;
   mediaType?: string;
   mediaSize?: number;
@@ -29,7 +31,7 @@ interface Props {
   onTextTop: (id: string, text: string) => void;
   onAttach: (id: string, file: File) => void;
   onLink: (id: string, url: string) => void;
-  onClear: (id: string) => void;
+  onWipe: (id: string) => void;
 }
 
 function humanSize(n?: number): string {
@@ -48,42 +50,45 @@ export default function CardView({
   onTextTop,
   onAttach,
   onLink,
-  onClear,
+  onWipe,
 }: Props) {
   const big = card.size === "big";
+  const isMedia = card.kind === "image" || card.kind === "video" || card.kind === "file";
   const fileInput = useRef<HTMLInputElement | null>(null);
   const [dragging, setDragging] = useState(false);
   const [objUrl, setObjUrl] = useState<string | null>(null);
-  const [missing, setMissing] = useState(false);
+  const [checked, setChecked] = useState(false);
 
-  // For image/file cards, pull the blob from IndexedDB and make an object URL.
-  // If the blob is not here (e.g. added on another device, only the reference
-  // synced), flag it as missing instead of spinning forever.
+  // Load a fast local copy from IndexedDB if this device has one. If not, we
+  // fall back to the cloud URL (card.mediaUrl) so other devices still see it.
   useEffect(() => {
     let cancelled = false;
     let url: string | null = null;
-    setMissing(false);
-    if ((card.kind === "image" || card.kind === "file") && card.mediaKey) {
+    setChecked(false);
+    setObjUrl(null);
+    if (isMedia && card.mediaKey) {
       idbGet(card.mediaKey)
         .then((blob) => {
           if (cancelled) return;
           if (blob) {
             url = URL.createObjectURL(blob);
             setObjUrl(url);
-          } else {
-            setObjUrl(null);
-            setMissing(true);
           }
+          setChecked(true);
         })
-        .catch(() => {});
+        .catch(() => {
+          if (!cancelled) setChecked(true);
+        });
     } else {
-      setObjUrl(null);
+      setChecked(true);
     }
     return () => {
       cancelled = true;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [card.kind, card.mediaKey]);
+  }, [isMedia, card.mediaKey]);
+
+  const src = objUrl || card.mediaUrl || null;
 
   function takeFiles(files: FileList | null) {
     const f = files && files[0];
@@ -93,9 +98,7 @@ export default function CardView({
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
     setDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files.length) {
-      takeFiles(e.dataTransfer.files);
-    }
+    if (e.dataTransfer.files && e.dataTransfer.files.length) takeFiles(e.dataTransfer.files);
   }
 
   function handlePaste(e: React.ClipboardEvent) {
@@ -110,7 +113,6 @@ export default function CardView({
         }
       }
     }
-    // A URL pasted into an empty text card becomes a link card.
     if (card.kind === "text" && !card.text.trim()) {
       const t = e.clipboardData.getData("text").trim();
       if (/^https?:\/\/\S+$/i.test(t)) {
@@ -118,16 +120,6 @@ export default function CardView({
         onLink(card.id, t);
       }
     }
-  }
-
-  function download() {
-    if (!objUrl) return;
-    const a = document.createElement("a");
-    a.href = objUrl;
-    a.download = card.mediaName || "scratch-download";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
   }
 
   async function copyLink() {
@@ -138,8 +130,12 @@ export default function CardView({
     }
   }
 
-  // Text zones that sit with media. The big card gets a note ABOVE the media
-  // and a caption BELOW it, so there is always an easy place to type.
+  function wipe() {
+    if (window.confirm("Erase this whole card? This can’t be undone.")) {
+      onWipe(card.id);
+    }
+  }
+
   const captionTop = (
     <textarea
       className="caption caption-top"
@@ -157,6 +153,12 @@ export default function CardView({
       placeholder="add a caption…"
       onChange={(e) => onText(card.id, e.target.value)}
     />
+  );
+
+  const mediaPlaceholder = card.mediaName ? (
+    <span className="media-missing">{card.mediaName} — not available yet</span>
+  ) : (
+    <span className="media-missing">media not available yet</span>
   );
 
   return (
@@ -198,10 +200,15 @@ export default function CardView({
                 : "text-[13px] leading-[21px] pt-[21px] px-4"
             }`}
           />
+          {card.text.trim() && (
+            <button type="button" className="card-wipe" title="Erase card" onClick={wipe}>
+              ✕
+            </button>
+          )}
           <button
             type="button"
             className="card-attach"
-            title="Attach an image or file"
+            title="Attach an image, video, or file"
             onClick={() => fileInput.current?.click()}
           >
             ＋
@@ -209,48 +216,54 @@ export default function CardView({
         </>
       )}
 
-      {card.kind === "image" && (
+      {(card.kind === "image" || card.kind === "video" || card.kind === "file") && (
         <>
           {big && captionTop}
           <div className="media-wrap">
-            {objUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={objUrl} alt={card.mediaName || "image"} className="media-img" />
-            ) : missing ? (
-              <span className="media-missing">image not on this device yet</span>
-            ) : (
-              <span className="media-loading">loading…</span>
-            )}
+            {card.kind === "image" &&
+              (src ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={src} alt={card.mediaName || "image"} className="media-img" />
+              ) : checked ? (
+                mediaPlaceholder
+              ) : (
+                <span className="media-loading">loading…</span>
+              ))}
+            {card.kind === "video" &&
+              (src ? (
+                <video src={src} className="media-video" controls playsInline />
+              ) : checked ? (
+                mediaPlaceholder
+              ) : (
+                <span className="media-loading">loading…</span>
+              ))}
+            {card.kind === "file" &&
+              (src ? (
+                <a className="file-chip" href={src} download={card.mediaName} target="_blank" rel="noopener noreferrer">
+                  <span className="file-ico">▤</span>
+                  <span className="file-meta">
+                    <span className="file-name">{card.mediaName || "file"}</span>
+                    <span className="file-size">{humanSize(card.mediaSize)} · open / download</span>
+                  </span>
+                </a>
+              ) : checked ? (
+                <div className="file-chip file-chip-missing">
+                  <span className="file-ico">▤</span>
+                  <span className="file-meta">
+                    <span className="file-name">{card.mediaName || "file"}</span>
+                    <span className="file-size">not available yet</span>
+                  </span>
+                </div>
+              ) : (
+                <span className="media-loading">loading…</span>
+              ))}
             <div className="card-tools">
-              <button type="button" onClick={download} title="Download">
-                ⭳
-              </button>
-              <button type="button" onClick={() => onClear(card.id)} title="Clear card">
-                ✕
-              </button>
-            </div>
-          </div>
-          {captionBottom}
-        </>
-      )}
-
-      {card.kind === "file" && (
-        <>
-          {big && captionTop}
-          <div className="media-wrap file-wrap">
-            <button type="button" className="file-chip" onClick={download} title="Download">
-              <span className="file-ico">▤</span>
-              <span className="file-meta">
-                <span className="file-name">{card.mediaName || "file"}</span>
-                <span className="file-size">
-                  {missing
-                    ? "not on this device yet"
-                    : `${humanSize(card.mediaSize)} · click to download`}
-                </span>
-              </span>
-            </button>
-            <div className="card-tools">
-              <button type="button" onClick={() => onClear(card.id)} title="Clear card">
+              {src && card.kind !== "file" && (
+                <a className="tool-btn" href={src} download={card.mediaName} target="_blank" rel="noopener noreferrer" title="Download">
+                  ⭳
+                </a>
+              )}
+              <button type="button" onClick={wipe} title="Erase card">
                 ✕
               </button>
             </div>
@@ -275,12 +288,7 @@ export default function CardView({
                     allowFullScreen
                   />
                 ) : (
-                  <a
-                    className="link-chip"
-                    href={info.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
+                  <a className="link-chip" href={info.url} target="_blank" rel="noopener noreferrer">
                     <span className="link-ico">↗</span>
                     <span className="link-meta">
                       <span className="link-domain">{info.domain}</span>
@@ -292,7 +300,7 @@ export default function CardView({
                   <button type="button" onClick={copyLink} title="Copy link">
                     ⧉
                   </button>
-                  <button type="button" onClick={() => onClear(card.id)} title="Clear card">
+                  <button type="button" onClick={wipe} title="Erase card">
                     ✕
                   </button>
                 </div>
