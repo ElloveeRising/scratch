@@ -11,7 +11,7 @@ const font = Courier_Prime({
 });
 
 export const metadata: Metadata = {
-  title: "Scratch",
+  title: "Scratch Pad",
   description: "A frictionless scratchpad",
 };
 

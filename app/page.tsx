@@ -33,6 +33,10 @@ function newKey(): string {
   return `m-${Date.now()}-${Math.round(Math.random() * 1e9)}`;
 }
 
+// Supabase free tier rejects single uploads over 50MB. Anything bigger skips the
+// (doomed) cloud upload and stays on-device only, so attaching never hangs.
+const MAX_SYNC_BYTES = 50 * 1024 * 1024;
+
 // ── Sync model: explicit save, single writer at a time ──────────────────
 // The old continuous merge fought itself: every keystroke and even just
 // OPENING the app made a device write its whole board to the cloud, so an open
@@ -267,7 +271,7 @@ export default function Home() {
     let mediaPath: string | undefined;
     const sb = supabase;
     const uid = userIdRef.current;
-    if (sb && uid) {
+    if (sb && uid && file.size <= MAX_SYNC_BYTES) {
       try {
         const ext =
           (file.name.split(".").pop() || "bin").replace(/[^a-zA-Z0-9]/g, "").slice(0, 8) || "bin";
@@ -376,7 +380,7 @@ export default function Home() {
     <div className="desk h-screen flex flex-col text-ink overflow-hidden">
       {/* ── Status bar ───────────────────────────────────────────────── */}
       <header className="flex-none flex items-center justify-between px-6 py-3 border-b border-black/25 text-manila">
-        <span className="text-xs font-bold tracking-[0.35em]">SCRATCH</span>
+        <span className="text-xs font-bold tracking-[0.35em]">SCRATCH PAD</span>
         <div className="flex items-center gap-3">
           {userEmail ? (
             <>
@@ -421,8 +425,7 @@ export default function Home() {
       </main>
 
       {/* ── Actions ──────────────────────────────────────────────────── */}
-      <footer className="flex-none flex items-center justify-between px-6 py-4 border-t border-black/25 text-manila">
-        <button className="scratch-btn">[DICTATE]</button>
+      <footer className="flex-none flex items-center justify-center px-6 py-4 border-t border-black/25 text-manila">
         <button className="scratch-btn">[SHARE]</button>
       </footer>
 

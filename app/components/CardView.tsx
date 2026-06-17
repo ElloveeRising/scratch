@@ -22,6 +22,34 @@ export interface Card {
   mediaSize?: number;
 }
 
+// Supabase free tier rejects single uploads over 50MB. Until chunked uploads
+// land, anything bigger is kept on-device only (no long doomed upload).
+const MAX_SYNC_BYTES = 50 * 1024 * 1024;
+
+// Minimal shape of the Web Speech API we use (it isn't in the TS DOM lib).
+interface SpeechRec {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  onresult:
+    | ((e: { results: { length: number; [i: number]: { [j: number]: { transcript: string } } } }) => void)
+    | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+type SpeechRecCtor = new () => SpeechRec;
+
+function getSpeechRecCtor(): SpeechRecCtor | null {
+  if (typeof window === "undefined") return null;
+  const w = window as unknown as {
+    SpeechRecognition?: SpeechRecCtor;
+    webkitSpeechRecognition?: SpeechRecCtor;
+  };
+  return w.SpeechRecognition || w.webkitSpeechRecognition || null;
+}
+
 interface Props {
   card: Card;
   tilt: { card: number; stamp: number };
@@ -48,10 +76,21 @@ export default function CardView({ card, tilt, className = "", onSave, onUpload 
   const [draft, setDraft] = useState<Card | null>(null);
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [tooBig, setTooBig] = useState(false);
 
   // Media preview
   const [objUrl, setObjUrl] = useState<string | null>(null);
   const [checked, setChecked] = useState(false);
+
+  // Dictation (Web Speech API)
+  const [listening, setListening] = useState(false);
+  const [canDictate, setCanDictate] = useState(false);
+  const recRef = useRef<SpeechRec | null>(null);
+  const dictBaseRef = useRef("");
+
+  useEffect(() => {
+    setCanDictate(!!getSpeechRecCtor());
+  }, []);
 
   // What we render: the draft while editing, otherwise the synced card.
   const shown = editing && draft ? draft : card;
@@ -86,16 +125,41 @@ export default function CardView({ card, tilt, className = "", onSave, onUpload 
     };
   }, [isMedia, shown.mediaKey]);
 
+  // Release the mic if the card unmounts mid-dictation.
+  useEffect(() => {
+    return () => {
+      try {
+        recRef.current?.stop();
+      } catch {
+        /* ignore */
+      }
+    };
+  }, []);
+
   const src = objUrl || shown.mediaUrl || null;
+
+  function stopDictation() {
+    try {
+      recRef.current?.stop();
+    } catch {
+      /* ignore */
+    }
+    recRef.current = null;
+    setListening(false);
+  }
 
   function startEdit() {
     setDraft({ ...card });
+    setTooBig(false);
     setEditing(true);
   }
   function cancel() {
+    stopDictation();
     setEditing(false);
     setDraft(null);
     setDragging(false);
+    setTooBig(false);
+    setBusy(false);
   }
   function patch(p: Partial<Card>) {
     setDraft((d) => (d ? { ...d, ...p } : d));
@@ -103,6 +167,7 @@ export default function CardView({ card, tilt, className = "", onSave, onUpload 
 
   async function save() {
     if (!draft) return;
+    stopDictation();
     setBusy(true);
     await onSave(card.id, {
       kind: draft.kind,
@@ -120,9 +185,11 @@ export default function CardView({ card, tilt, className = "", onSave, onUpload 
     setEditing(false);
     setDraft(null);
     setDragging(false);
+    setTooBig(false);
   }
 
   async function attach(file: File) {
+    setTooBig(file.size > MAX_SYNC_BYTES);
     setBusy(true);
     const m = await onUpload(file);
     if (m) patch(m);
@@ -135,6 +202,7 @@ export default function CardView({ card, tilt, className = "", onSave, onUpload 
 
   // Clear everything back to an empty text card (committed on Save).
   function clearAll() {
+    setTooBig(false);
     patch({
       kind: "text",
       text: "",
@@ -147,6 +215,41 @@ export default function CardView({ card, tilt, className = "", onSave, onUpload 
       mediaType: undefined,
       mediaSize: undefined,
     });
+  }
+
+  function toggleDictation() {
+    if (listening) {
+      stopDictation();
+      return;
+    }
+    const Ctor = getSpeechRecCtor();
+    if (!Ctor || !draft) return;
+    const rec = new Ctor();
+    rec.lang = "en-US";
+    rec.continuous = true;
+    rec.interimResults = true;
+    dictBaseRef.current = (draft.text ?? "").trim();
+    rec.onresult = (e) => {
+      let transcript = "";
+      for (let i = 0; i < e.results.length; i++) transcript += e.results[i][0].transcript;
+      const base = dictBaseRef.current;
+      patch({ text: base ? `${base} ${transcript}` : transcript });
+    };
+    rec.onend = () => {
+      recRef.current = null;
+      setListening(false);
+    };
+    rec.onerror = () => {
+      recRef.current = null;
+      setListening(false);
+    };
+    try {
+      rec.start();
+      recRef.current = rec;
+      setListening(true);
+    } catch {
+      /* mic unavailable / permission denied */
+    }
   }
 
   function handleDrop(e: React.DragEvent) {
@@ -371,6 +474,12 @@ export default function CardView({ card, tilt, className = "", onSave, onUpload 
             mediaBlock}
           {draft.kind === "link" && linkBlock}
 
+          {tooBig && (
+            <div className="media-note">
+              kept on this device — too big to sync yet (we’re working on it)
+            </div>
+          )}
+
           <textarea
             autoFocus
             spellCheck={false}
@@ -385,18 +494,31 @@ export default function CardView({ card, tilt, className = "", onSave, onUpload 
           />
 
           <div className="edit-bar">
-            <button
-              type="button"
-              className="card-attach-edit"
-              onClick={() => fileInput.current?.click()}
-              disabled={busy}
-              title="Attach or replace an image, video, or file"
-            >
-              ＋ {isMedia ? "replace" : "attach"}
-            </button>
+            <div className="edit-bar-left">
+              <button
+                type="button"
+                className="card-attach-edit"
+                onClick={() => fileInput.current?.click()}
+                disabled={busy}
+                title="Attach or replace an image, video, or file"
+              >
+                ＋ {isMedia ? "replace" : "attach"}
+              </button>
+              {canDictate && (
+                <button
+                  type="button"
+                  className={`card-mic ${listening ? "is-live" : ""}`}
+                  onClick={toggleDictation}
+                  disabled={busy}
+                  title="Dictate with your voice"
+                >
+                  {listening ? "● listening" : "🎤 speak"}
+                </button>
+              )}
+            </div>
             <div className="edit-bar-right">
               {busy && <span className="edit-busy">working…</span>}
-              <button type="button" className="edit-cancel" onClick={cancel} disabled={busy}>
+              <button type="button" className="edit-cancel" onClick={cancel}>
                 cancel
               </button>
               <button type="button" className="scratch-btn edit-save" onClick={save} disabled={busy}>
