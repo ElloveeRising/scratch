@@ -10,10 +10,10 @@ const STORAGE_KEY = "scratch:board:v1";
 
 // Fixed board: one big "main" card plus three small cards.
 const DEFAULT_CARDS: Card[] = [
-  { id: "main", label: "MAIN", size: "big", kind: "text", text: "" },
-  { id: "c1", label: "01", size: "small", kind: "text", text: "" },
-  { id: "c2", label: "02", size: "small", kind: "text", text: "" },
-  { id: "c3", label: "03", size: "small", kind: "text", text: "" },
+  { id: "main", label: "MAIN", size: "big", kind: "text", text: "", updatedAt: 0 },
+  { id: "c1", label: "01", size: "small", kind: "text", text: "", updatedAt: 0 },
+  { id: "c2", label: "02", size: "small", kind: "text", text: "", updatedAt: 0 },
+  { id: "c3", label: "03", size: "small", kind: "text", text: "", updatedAt: 0 },
 ];
 
 // Deterministic "hand-placed" tilts (degrees) so SSR and client match.
@@ -31,19 +31,6 @@ function newKey(): string {
     /* fall through */
   }
   return `m-${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-}
-
-function readLocalUpdatedAt(): number {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const p = JSON.parse(raw) as { updatedAt?: number };
-      return typeof p.updatedAt === "number" ? p.updatedAt : 0;
-    }
-  } catch {
-    /* ignore */
-  }
-  return 0;
 }
 
 // Merge a saved/remote cards array onto the fixed layout, keeping ids stable
@@ -71,18 +58,9 @@ function mergeCards(base: Card[], saved: Partial<Card>[]): Card[] {
       mediaName: hit.mediaName,
       mediaType: hit.mediaType,
       mediaSize: hit.mediaSize,
+      updatedAt: hit.updatedAt ?? 0,
     };
   });
-}
-
-function hasContent(c: Partial<Card>): boolean {
-  return Boolean(
-    (c.text && c.text.trim()) ||
-      (c.textTop && c.textTop.trim()) ||
-      c.linkUrl ||
-      c.mediaKey ||
-      c.mediaUrl
-  );
 }
 
 function cardFromRemote(base: Card, r: Partial<Card>): Card {
@@ -105,24 +83,23 @@ function cardFromRemote(base: Card, r: Partial<Card>): Card {
     mediaName: r.mediaName,
     mediaType: r.mediaType,
     mediaSize: r.mediaSize,
+    updatedAt: r.updatedAt ?? 0,
   };
 }
 
-// Merge remote into local per card, preferring whichever side actually has
-// content so a blank board can NEVER erase a full one. Only genuine
-// content-vs-content conflicts fall back to last-write-wins on the timestamp.
-function mergeBoards(local: Card[], remote: Partial<Card>[], localNewer: boolean): Card[] {
+// Per-card last-write-wins: for each card id, keep whichever side was edited
+// most recently (by its own `updatedAt`). Device-agnostic — the newest edit
+// always wins, no matter which device made it. Also safe against the old
+// blank-clobber bug: a fresh device's cards are `updatedAt: 0`, so the cloud's
+// real-timestamped cards win; and a delete is simply the newest edit, so it
+// wins and propagates to the other device.
+function mergeBoards(local: Card[], remote: Partial<Card>[]): Card[] {
   return local.map((lc) => {
     const rc = remote.find((r) => r.id === lc.id);
     if (!rc) return lc;
-    const lHas = hasContent(lc);
-    const rHas = hasContent(rc);
-    let takeRemote: boolean;
-    if (lHas && !rHas) takeRemote = false; // keep our content
-    else if (rHas && !lHas) takeRemote = true; // take their content
-    else if (!lHas && !rHas) takeRemote = false; // both empty
-    else takeRemote = !localNewer; // both have content → last-write-wins
-    return takeRemote ? cardFromRemote(lc, rc) : lc;
+    const remoteAt = rc.updatedAt ?? 0;
+    const localAt = lc.updatedAt ?? 0;
+    return remoteAt > localAt ? cardFromRemote(lc, rc) : lc;
   });
 }
 
@@ -220,7 +197,7 @@ export default function Home() {
       // Ignore the echo of our own just-pushed change (and any stale one) so
       // in-progress typing is never reverted by our own write coming back.
       if (incTs <= lastSyncedAtRef.current) return;
-      const merged = mergeBoards(cardsRef.current, inc.cards ?? [], false);
+      const merged = mergeBoards(cardsRef.current, inc.cards ?? []);
       cardsRef.current = merged;
       lastSyncedRef.current = JSON.stringify(merged);
       lastSyncedAtRef.current = incTs;
@@ -244,7 +221,7 @@ export default function Home() {
       try {
         const { data } = await sb
           .from("buffers")
-          .select("content, updated_at")
+          .select("content")
           .eq("user_id", uid)
           .maybeSingle();
         if (cancelled) return;
@@ -256,8 +233,7 @@ export default function Home() {
           } catch {
             /* ignore malformed remote */
           }
-          const localNewer = readLocalUpdatedAt() > Date.parse(data.updated_at);
-          const merged = mergeBoards(cardsRef.current, remoteCards, localNewer);
+          const merged = mergeBoards(cardsRef.current, remoteCards);
           cardsRef.current = merged;
           lastSyncedRef.current = JSON.stringify(merged);
           setCards(merged);
@@ -311,11 +287,15 @@ export default function Home() {
   }, [cards, hydrated, userEmail, online, pushRemote]);
 
   const onText = useCallback((id: string, text: string) => {
-    setCards((prev) => prev.map((c) => (c.id === id ? { ...c, text } : c)));
+    setCards((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, text, updatedAt: Date.now() } : c))
+    );
   }, []);
 
   const onTextTop = useCallback((id: string, text: string) => {
-    setCards((prev) => prev.map((c) => (c.id === id ? { ...c, textTop: text } : c)));
+    setCards((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, textTop: text, updatedAt: Date.now() } : c))
+    );
   }, []);
 
   const onAttach = useCallback(async (id: string, file: File) => {
@@ -375,6 +355,7 @@ export default function Home() {
               mediaName: file.name,
               mediaType: file.type,
               mediaSize: file.size,
+              updatedAt: Date.now(),
             }
           : c
       )
@@ -396,6 +377,7 @@ export default function Home() {
               mediaName: undefined,
               mediaType: undefined,
               mediaSize: undefined,
+              updatedAt: Date.now(),
             }
           : c
       )
@@ -424,6 +406,7 @@ export default function Home() {
               mediaName: undefined,
               mediaType: undefined,
               mediaSize: undefined,
+              updatedAt: Date.now(),
             }
           : c
       )

@@ -20,6 +20,7 @@ export interface Card {
   mediaName?: string;
   mediaType?: string;
   mediaSize?: number;
+  updatedAt: number; // ms timestamp of the last edit to THIS card — drives per-card last-write-wins
 }
 
 interface Props {
