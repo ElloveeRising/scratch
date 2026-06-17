@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import CardView, { type Card } from "./components/CardView";
 import Connect from "./components/Connect";
+import ShareModal from "./components/ShareModal";
 import { idbDel, idbPut } from "./lib/idb";
 import { supabase } from "./lib/supabase";
 
@@ -91,6 +92,7 @@ export default function Home() {
   const [online, setOnline] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showConnect, setShowConnect] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const userIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -410,6 +412,7 @@ export default function Home() {
             className="sm:col-span-2 sm:row-span-3"
             onSave={onSave}
             onUpload={onUpload}
+            onShare={() => setSharing(true)}
           />
           {smalls.map((c) => (
             <CardView
@@ -424,12 +427,8 @@ export default function Home() {
         </div>
       </main>
 
-      {/* ── Actions ──────────────────────────────────────────────────── */}
-      <footer className="flex-none flex items-center justify-center px-6 py-4 border-t border-black/25 text-manila">
-        <button className="scratch-btn">[SHARE]</button>
-      </footer>
-
       {showConnect && <Connect onClose={() => setShowConnect(false)} />}
+      {sharing && <ShareModal card={big} onClose={() => setSharing(false)} />}
     </div>
   );
 }

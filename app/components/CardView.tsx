@@ -58,6 +58,8 @@ interface Props {
   onSave: (id: string, fields: Partial<Card>) => Promise<void> | void;
   // Upload a file and return the media fields for the draft (no commit).
   onUpload: (file: File) => Promise<Partial<Card> | null>;
+  // If provided, show a Share button (used only on the one shareable card).
+  onShare?: () => void;
 }
 
 function humanSize(n?: number): string {
@@ -67,7 +69,7 @@ function humanSize(n?: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export default function CardView({ card, tilt, className = "", onSave, onUpload }: Props) {
+export default function CardView({ card, tilt, className = "", onSave, onUpload, onShare }: Props) {
   const big = card.size === "big";
   const fileInput = useRef<HTMLInputElement | null>(null);
 
@@ -458,6 +460,11 @@ export default function CardView({ card, tilt, className = "", onSave, onUpload 
             {card.kind === "link" && (
               <button type="button" className="card-btn" onClick={copyLink} title="Copy link">
                 ⧉
+              </button>
+            )}
+            {onShare && (
+              <button type="button" className="card-btn" onClick={onShare} title="Share this card">
+                ▦ share
               </button>
             )}
             <button type="button" className="card-btn" onClick={startEdit}>
