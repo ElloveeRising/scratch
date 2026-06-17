@@ -11,7 +11,7 @@ export interface Card {
   label: string;
   size: "big" | "small";
   kind: Kind;
-  text: string; // body for text cards; bottom caption for media cards
+  text: string; // body for text cards; caption for media/link cards
   textTop?: string; // top note for media cards (big card only)
   linkUrl?: string; // URL for link cards
   mediaKey?: string; // IndexedDB key for a local copy of the blob
@@ -26,12 +26,10 @@ interface Props {
   card: Card;
   tilt: { card: number; stamp: number };
   className?: string;
-  autoFocus?: boolean;
-  onText: (id: string, text: string) => void;
-  onTextTop: (id: string, text: string) => void;
-  onAttach: (id: string, file: File) => void;
-  onLink: (id: string, url: string) => void;
-  onWipe: (id: string) => void;
+  // Commit this card's draft to state + cloud. The ONLY write path.
+  onSave: (id: string, fields: Partial<Card>) => Promise<void> | void;
+  // Upload a file and return the media fields for the draft (no commit).
+  onUpload: (file: File) => Promise<Partial<Card> | null>;
 }
 
 function humanSize(n?: number): string {
@@ -41,33 +39,33 @@ function humanSize(n?: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export default function CardView({
-  card,
-  tilt,
-  className = "",
-  autoFocus,
-  onText,
-  onTextTop,
-  onAttach,
-  onLink,
-  onWipe,
-}: Props) {
+export default function CardView({ card, tilt, className = "", onSave, onUpload }: Props) {
   const big = card.size === "big";
-  const isMedia = card.kind === "image" || card.kind === "video" || card.kind === "file";
   const fileInput = useRef<HTMLInputElement | null>(null);
+
+  // Edit state: a private draft that only becomes real on Save.
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<Card | null>(null);
+  const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
+
+  // Media preview
   const [objUrl, setObjUrl] = useState<string | null>(null);
   const [checked, setChecked] = useState(false);
 
-  // Load a fast local copy from IndexedDB if this device has one. If not, we
-  // fall back to the cloud URL (card.mediaUrl) so other devices still see it.
+  // What we render: the draft while editing, otherwise the synced card.
+  const shown = editing && draft ? draft : card;
+  const isMedia = shown.kind === "image" || shown.kind === "video" || shown.kind === "file";
+
+  // Load a fast local copy from IndexedDB if this device has one; otherwise fall
+  // back to the cloud URL so other devices still see the media.
   useEffect(() => {
     let cancelled = false;
     let url: string | null = null;
     setChecked(false);
     setObjUrl(null);
-    if (isMedia && card.mediaKey) {
-      idbGet(card.mediaKey)
+    if (isMedia && shown.mediaKey) {
+      idbGet(shown.mediaKey)
         .then((blob) => {
           if (cancelled) return;
           if (blob) {
@@ -86,38 +84,95 @@ export default function CardView({
       cancelled = true;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [isMedia, card.mediaKey]);
+  }, [isMedia, shown.mediaKey]);
 
-  const src = objUrl || card.mediaUrl || null;
+  const src = objUrl || shown.mediaUrl || null;
 
+  function startEdit() {
+    setDraft({ ...card });
+    setEditing(true);
+  }
+  function cancel() {
+    setEditing(false);
+    setDraft(null);
+    setDragging(false);
+  }
+  function patch(p: Partial<Card>) {
+    setDraft((d) => (d ? { ...d, ...p } : d));
+  }
+
+  async function save() {
+    if (!draft) return;
+    setBusy(true);
+    await onSave(card.id, {
+      kind: draft.kind,
+      text: draft.text ?? "",
+      textTop: draft.textTop,
+      linkUrl: draft.linkUrl,
+      mediaKey: draft.mediaKey,
+      mediaUrl: draft.mediaUrl,
+      mediaPath: draft.mediaPath,
+      mediaName: draft.mediaName,
+      mediaType: draft.mediaType,
+      mediaSize: draft.mediaSize,
+    });
+    setBusy(false);
+    setEditing(false);
+    setDraft(null);
+    setDragging(false);
+  }
+
+  async function attach(file: File) {
+    setBusy(true);
+    const m = await onUpload(file);
+    if (m) patch(m);
+    setBusy(false);
+  }
   function takeFiles(files: FileList | null) {
     const f = files && files[0];
-    if (f) onAttach(card.id, f);
+    if (f) attach(f);
+  }
+
+  // Clear everything back to an empty text card (committed on Save).
+  function clearAll() {
+    patch({
+      kind: "text",
+      text: "",
+      textTop: undefined,
+      linkUrl: undefined,
+      mediaKey: undefined,
+      mediaUrl: undefined,
+      mediaPath: undefined,
+      mediaName: undefined,
+      mediaType: undefined,
+      mediaSize: undefined,
+    });
   }
 
   function handleDrop(e: React.DragEvent) {
+    if (!editing) return;
     e.preventDefault();
     setDragging(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length) takeFiles(e.dataTransfer.files);
   }
-
   function handlePaste(e: React.ClipboardEvent) {
+    if (!editing || !draft) return;
     const items = e.clipboardData.items;
     for (let i = 0; i < items.length; i++) {
       if (items[i].type.startsWith("image/")) {
         const blob = items[i].getAsFile();
         if (blob) {
           e.preventDefault();
-          onAttach(card.id, blob);
+          attach(blob);
           return;
         }
       }
     }
-    if (card.kind === "text" && !card.text.trim()) {
+    if (draft.kind === "text" && !(draft.text ?? "").trim()) {
       const t = e.clipboardData.getData("text").trim();
       if (/^https?:\/\/\S+$/i.test(t)) {
         e.preventDefault();
-        onLink(card.id, t);
+        patch({ kind: "link", linkUrl: t, text: "" });
       }
     }
   }
@@ -130,42 +185,112 @@ export default function CardView({
     }
   }
 
-  function wipe() {
-    if (window.confirm("Erase this whole card? This can’t be undone.")) {
-      onWipe(card.id);
-    }
-  }
+  const textClass = big
+    ? "text-[15px] leading-[27px] pt-[27px] pl-[60px] pr-6"
+    : "text-[13px] leading-[21px] pt-[21px] px-4";
 
-  const captionTop = (
-    <textarea
-      className="caption caption-top"
-      spellCheck={false}
-      value={card.textTop ?? ""}
-      placeholder="write a note…"
-      onChange={(e) => onTextTop(card.id, e.target.value)}
-    />
-  );
-  const captionBottom = (
-    <textarea
-      className="caption"
-      spellCheck={false}
-      value={card.text}
-      placeholder="add a caption…"
-      onChange={(e) => onText(card.id, e.target.value)}
-    />
-  );
-
-  const mediaPlaceholder = card.mediaName ? (
-    <span className="media-missing">{card.mediaName} — not available yet</span>
+  // ── Media block (shared by view + edit) ─────────────────────────────
+  const mediaPlaceholder = shown.mediaName ? (
+    <span className="media-missing">{shown.mediaName} — not synced yet</span>
   ) : (
     <span className="media-missing">media not available yet</span>
   );
 
+  const mediaBlock = (
+    <div className="media-wrap">
+      {shown.kind === "image" &&
+        (src ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={src} alt={shown.mediaName || "image"} className="media-img" />
+        ) : checked ? (
+          mediaPlaceholder
+        ) : (
+          <span className="media-loading">loading…</span>
+        ))}
+      {shown.kind === "video" &&
+        (src ? (
+          <video src={src} className="media-video" controls playsInline />
+        ) : checked ? (
+          mediaPlaceholder
+        ) : (
+          <span className="media-loading">loading…</span>
+        ))}
+      {shown.kind === "file" &&
+        (src ? (
+          <a
+            className="file-chip"
+            href={src}
+            download={shown.mediaName}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <span className="file-ico">▤</span>
+            <span className="file-meta">
+              <span className="file-name">{shown.mediaName || "file"}</span>
+              <span className="file-size">{humanSize(shown.mediaSize)} · open / download</span>
+            </span>
+          </a>
+        ) : checked ? (
+          <div className="file-chip file-chip-missing">
+            <span className="file-ico">▤</span>
+            <span className="file-meta">
+              <span className="file-name">{shown.mediaName || "file"}</span>
+              <span className="file-size">not synced yet</span>
+            </span>
+          </div>
+        ) : (
+          <span className="media-loading">loading…</span>
+        ))}
+      {editing && (
+        <div className="card-tools">
+          <button type="button" onClick={clearAll} title="Remove media">
+            ✕
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
+  const linkBlock = (() => {
+    const info = parseLink(shown.linkUrl || shown.text);
+    return (
+      <div className="media-wrap link-wrap">
+        {info.embedUrl ? (
+          <iframe
+            className="link-embed"
+            src={info.embedUrl}
+            title={info.domain}
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+          />
+        ) : (
+          <a className="link-chip" href={info.url} target="_blank" rel="noopener noreferrer">
+            <span className="link-ico">↗</span>
+            <span className="link-meta">
+              <span className="link-domain">{info.domain}</span>
+              <span className="link-url">{info.url}</span>
+            </span>
+          </a>
+        )}
+        {editing && (
+          <div className="card-tools">
+            <button type="button" onClick={clearAll} title="Remove link">
+              ✕
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  })();
+
   return (
     <div
-      className={`card ${big ? "is-big" : "is-small"} ${dragging ? "is-drop" : ""} ${className}`}
+      className={`card ${big ? "is-big" : "is-small"} ${editing ? "is-editing" : ""} ${
+        dragging ? "is-drop" : ""
+      } ${className}`}
       style={{ transform: `rotate(${tilt.card}deg)` }}
       onDragOver={(e) => {
+        if (!editing) return;
         e.preventDefault();
         if (!dragging) setDragging(true);
       }}
@@ -187,128 +312,100 @@ export default function CardView({
         }}
       />
 
-      {card.kind === "text" && (
+      {/* ── VIEW MODE ─────────────────────────────────────────────── */}
+      {!editing && (
         <>
-          <textarea
-            autoFocus={autoFocus}
-            spellCheck={false}
-            value={card.text}
-            onChange={(e) => onText(card.id, e.target.value)}
-            className={`flex-1 w-full resize-none outline-none bg-transparent text-ink ${
-              big
-                ? "text-[15px] leading-[27px] pt-[27px] pl-[60px] pr-6"
-                : "text-[13px] leading-[21px] pt-[21px] px-4"
-            }`}
-          />
-          {card.text.trim() && (
-            <button type="button" className="card-wipe" title="Erase card" onClick={wipe}>
-              ✕
-            </button>
+          {card.kind === "text" && (
+            <div className={`card-text-view flex-1 w-full ${textClass}`}>
+              {card.text ? (
+                card.text
+              ) : (
+                <span className="card-empty">empty — tap edit to add something</span>
+              )}
+            </div>
           )}
-          <button
-            type="button"
-            className="card-attach"
-            title="Attach an image, video, or file"
-            onClick={() => fileInput.current?.click()}
-          >
-            ＋
-          </button>
+          {(card.kind === "image" || card.kind === "video" || card.kind === "file") && (
+            <>
+              {big && card.textTop && <div className="caption caption-top">{card.textTop}</div>}
+              {mediaBlock}
+              {card.text && <div className="caption">{card.text}</div>}
+            </>
+          )}
+          {card.kind === "link" && (
+            <>
+              {big && card.textTop && <div className="caption caption-top">{card.textTop}</div>}
+              {linkBlock}
+              {card.text && <div className="caption">{card.text}</div>}
+            </>
+          )}
+
+          <div className="card-view-tools">
+            {src && isMedia && (
+              <a
+                className="card-btn"
+                href={src}
+                download={card.mediaName}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Download"
+              >
+                ⭳
+              </a>
+            )}
+            {card.kind === "link" && (
+              <button type="button" className="card-btn" onClick={copyLink} title="Copy link">
+                ⧉
+              </button>
+            )}
+            <button type="button" className="card-btn" onClick={startEdit}>
+              ✎ edit
+            </button>
+          </div>
         </>
       )}
 
-      {(card.kind === "image" || card.kind === "video" || card.kind === "file") && (
+      {/* ── EDIT MODE ─────────────────────────────────────────────── */}
+      {editing && draft && (
         <>
-          {big && captionTop}
-          <div className="media-wrap">
-            {card.kind === "image" &&
-              (src ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={src} alt={card.mediaName || "image"} className="media-img" />
-              ) : checked ? (
-                mediaPlaceholder
-              ) : (
-                <span className="media-loading">loading…</span>
-              ))}
-            {card.kind === "video" &&
-              (src ? (
-                <video src={src} className="media-video" controls playsInline />
-              ) : checked ? (
-                mediaPlaceholder
-              ) : (
-                <span className="media-loading">loading…</span>
-              ))}
-            {card.kind === "file" &&
-              (src ? (
-                <a className="file-chip" href={src} download={card.mediaName} target="_blank" rel="noopener noreferrer">
-                  <span className="file-ico">▤</span>
-                  <span className="file-meta">
-                    <span className="file-name">{card.mediaName || "file"}</span>
-                    <span className="file-size">{humanSize(card.mediaSize)} · open / download</span>
-                  </span>
-                </a>
-              ) : checked ? (
-                <div className="file-chip file-chip-missing">
-                  <span className="file-ico">▤</span>
-                  <span className="file-meta">
-                    <span className="file-name">{card.mediaName || "file"}</span>
-                    <span className="file-size">not available yet</span>
-                  </span>
-                </div>
-              ) : (
-                <span className="media-loading">loading…</span>
-              ))}
-            <div className="card-tools">
-              {src && card.kind !== "file" && (
-                <a className="tool-btn" href={src} download={card.mediaName} target="_blank" rel="noopener noreferrer" title="Download">
-                  ⭳
-                </a>
-              )}
-              <button type="button" onClick={wipe} title="Erase card">
-                ✕
+          {(draft.kind === "image" || draft.kind === "video" || draft.kind === "file") &&
+            mediaBlock}
+          {draft.kind === "link" && linkBlock}
+
+          <textarea
+            autoFocus
+            spellCheck={false}
+            value={draft.text ?? ""}
+            placeholder={isMedia || draft.kind === "link" ? "add a caption…" : "write…"}
+            onChange={(e) => patch({ text: e.target.value })}
+            className={
+              isMedia || draft.kind === "link"
+                ? "caption"
+                : `flex-1 w-full resize-none outline-none bg-transparent text-ink ${textClass}`
+            }
+          />
+
+          <div className="edit-bar">
+            <button
+              type="button"
+              className="card-attach-edit"
+              onClick={() => fileInput.current?.click()}
+              disabled={busy}
+              title="Attach or replace an image, video, or file"
+            >
+              ＋ {isMedia ? "replace" : "attach"}
+            </button>
+            <div className="edit-bar-right">
+              {busy && <span className="edit-busy">working…</span>}
+              <button type="button" className="edit-cancel" onClick={cancel} disabled={busy}>
+                cancel
+              </button>
+              <button type="button" className="scratch-btn edit-save" onClick={save} disabled={busy}>
+                {busy ? "saving…" : "save"}
               </button>
             </div>
           </div>
-          {captionBottom}
         </>
       )}
-
-      {card.kind === "link" &&
-        (() => {
-          const info = parseLink(card.linkUrl || card.text);
-          return (
-            <>
-              {big && captionTop}
-              <div className="media-wrap link-wrap">
-                {info.embedUrl ? (
-                  <iframe
-                    className="link-embed"
-                    src={info.embedUrl}
-                    title={info.domain}
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                  />
-                ) : (
-                  <a className="link-chip" href={info.url} target="_blank" rel="noopener noreferrer">
-                    <span className="link-ico">↗</span>
-                    <span className="link-meta">
-                      <span className="link-domain">{info.domain}</span>
-                      <span className="link-url">{info.url}</span>
-                    </span>
-                  </a>
-                )}
-                <div className="card-tools">
-                  <button type="button" onClick={copyLink} title="Copy link">
-                    ⧉
-                  </button>
-                  <button type="button" onClick={wipe} title="Erase card">
-                    ✕
-                  </button>
-                </div>
-              </div>
-              {captionBottom}
-            </>
-          );
-        })()}
     </div>
   );
 }

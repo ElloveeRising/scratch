@@ -529,4 +529,123 @@
     color: var(--manila);
     border-color: var(--stamp-red);
   }
+
+  /* View-mode action cluster — always visible so it works on touch (no hover) */
+  .card-view-tools {
+    position: absolute;
+    bottom: 8px;
+    right: 9px;
+    z-index: 3;
+    display: flex;
+    gap: 5px;
+  }
+  .card-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    line-height: 1;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink);
+    background: var(--manila);
+    border: 1px solid rgba(60, 45, 25, 0.5);
+    border-radius: 3px;
+    box-shadow: 1px 1px 0 rgba(18, 9, 2, 0.35);
+    padding: 4px 8px;
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .card-btn:hover {
+    background: var(--ink);
+    color: var(--manila);
+  }
+
+  /* Static (read-only) text in view mode — keep line breaks, leave room for the edit button */
+  .card-text-view {
+    min-height: 0;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    padding-bottom: 38px;
+  }
+  .card-empty {
+    opacity: 0.35;
+    font-style: italic;
+  }
+
+  /* A card being edited gets a clear outline so its state is obvious */
+  .card.is-editing {
+    outline: 2px solid rgba(168, 68, 46, 0.55);
+    outline-offset: -4px;
+  }
+
+  /* Edit-mode action bar, pinned to the bottom of the card */
+  .edit-bar {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 7px 9px;
+    border-top: 1px solid rgba(60, 45, 25, 0.25);
+    background: rgba(168, 68, 46, 0.07);
+  }
+  .edit-bar-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .card-attach-edit {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    line-height: 1;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink);
+    background: rgba(255, 255, 255, 0.22);
+    border: 1px solid rgba(60, 45, 25, 0.45);
+    border-radius: 3px;
+    padding: 6px 9px;
+    cursor: pointer;
+  }
+  .card-attach-edit:hover {
+    background: var(--ink);
+    color: var(--manila);
+  }
+  .edit-cancel {
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink);
+    opacity: 0.55;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+  }
+  .edit-cancel:hover {
+    opacity: 1;
+  }
+  .edit-save {
+    padding: 6px 16px;
+  }
+  .edit-busy {
+    font-size: 10px;
+    font-style: italic;
+    opacity: 0.6;
+  }
+  .edit-save:disabled,
+  .card-attach-edit:disabled,
+  .edit-cancel:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  /* Captions render as plain blocks in view mode; keep their line breaks */
+  .caption {
+    white-space: pre-wrap;
+  }
 }

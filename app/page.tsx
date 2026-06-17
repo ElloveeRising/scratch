@@ -33,42 +33,18 @@ function newKey(): string {
   return `m-${Date.now()}-${Math.round(Math.random() * 1e9)}`;
 }
 
-// ── Sync model: recency only, with NO cross-device clocks ────────────────
-// Device clocks disagree, so comparing timestamps between a phone and a laptop
-// is unreliable (it caused photos to lose to older text, deletes to be ignored,
-// etc.). Instead, each device remembers the last board it agreed on with the
-// cloud — the "base". When a board arrives, we ask one question per card:
+// ── Sync model: explicit save, single writer at a time ──────────────────
+// The old continuous merge fought itself: every keystroke and even just
+// OPENING the app made a device write its whole board to the cloud, so an open
+// laptop constantly steamrolled the phone. The fix is to make writes
+// intentional: a card is edited as a private DRAFT (in CardView) and only the
+// SAVE button writes to the cloud. A device that's merely viewing never writes,
+// so it can't override anything; whatever you SAVE last wins, cleanly.
 //
-//   Did the OTHER side change this card since we last agreed (remote ≠ base)?
-//     • yes → take theirs   (their action is the most recent — photo, edit, or erase)
-//     • no  → keep ours     (we're the only one who touched it, if anyone)
-//
-// That single rule gives true recency on both ends, makes deletes propagate,
-// and ignores our own echoes (an echo equals base, so "no change" → keep ours).
-// A card's "did it change" identity (see `sig`) ignores device-local fields so
-// the same media is never mistaken for a change across devices.
-
-// Content signature of a card — the fields that actually sync. Excludes
-// `mediaKey` (a per-device IndexedDB id), so identical media on two devices
-// reads as unchanged.
-function sig(c?: Partial<Card>): string {
-  if (!c) return "∅";
-  return JSON.stringify([
-    c.kind ?? "text",
-    c.text ?? "",
-    c.textTop ?? "",
-    c.linkUrl ?? "",
-    c.mediaUrl ?? "",
-    c.mediaPath ?? "",
-    c.mediaName ?? "",
-    c.mediaType ?? "",
-    c.mediaSize ?? 0,
-  ]);
-}
-
-function boardSig(cards: Partial<Card>[]): string {
-  return cards.map((c) => `${c.id}:${sig(c)}`).join("|");
-}
+// Reads are simple and robust: pull the cloud on load and whenever the app
+// regains focus, plus a live realtime subscription. There's no per-card merge
+// to get wrong — view cards just reflect the cloud; the card you're editing is
+// shielded by its local draft until you commit it.
 
 // Lay a saved/remote cards array onto the fixed layout, keeping ids stable and
 // migrating older link cards that stored the URL in `text`.
@@ -99,46 +75,7 @@ function mergeCards(base: Card[], saved: Partial<Card>[]): Card[] {
   });
 }
 
-// Build a card from a remote one. We deliberately DROP `mediaKey` (it points at
-// the other device's IndexedDB, which we don't have) so this device loads the
-// media from the shared cloud URL instead.
-function cardFromRemote(base: Card, r: Partial<Card>): Card {
-  const kind = r.kind ?? "text";
-  let text = r.text ?? "";
-  let linkUrl = r.linkUrl;
-  if (kind === "link" && !linkUrl) {
-    linkUrl = text;
-    text = "";
-  }
-  return {
-    ...base,
-    kind,
-    text,
-    textTop: r.textTop,
-    linkUrl,
-    mediaKey: undefined,
-    mediaUrl: r.mediaUrl,
-    mediaPath: r.mediaPath,
-    mediaName: r.mediaName,
-    mediaType: r.mediaType,
-    mediaSize: r.mediaSize,
-  };
-}
-
-// Per-card recency merge (see note above): for each card, if the remote differs
-// from our agreed base, the other device changed it → take theirs; otherwise we
-// keep ours. No timestamps anywhere.
-function mergeRemote(base: Card[], local: Card[], remote: Partial<Card>[]): Card[] {
-  return local.map((lc) => {
-    const rc = remote.find((r) => r.id === lc.id);
-    if (!rc) return lc;
-    const baseSig = sig(base.find((b) => b.id === lc.id));
-    const remoteChanged = sig(rc) !== baseSig;
-    return remoteChanged ? cardFromRemote(lc, rc) : lc;
-  });
-}
-
-type SyncStatus = "local" | "offline" | "syncing" | "synced";
+type SyncStatus = "local" | "offline" | "saving" | "synced";
 
 export default function Home() {
   const [cards, setCards] = useState<Card[]>(DEFAULT_CARDS);
@@ -148,50 +85,46 @@ export default function Home() {
   // Sync-related state
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [online, setOnline] = useState(true);
-  const [pushing, setPushing] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [showConnect, setShowConnect] = useState(false);
   const userIdRef = useRef<string | null>(null);
-  // The last board we agreed on with the cloud (pushed or received). This is the
-  // anchor for the recency merge above — NOT a timestamp.
-  const baseRef = useRef<Card[]>(DEFAULT_CARDS);
-  const pushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     cardsRef.current = cards;
   }, [cards]);
 
-  // Write the current board + base to this device's local storage.
-  const persistNow = useCallback(() => {
+  // Write the current board to this device's local storage (instant + offline).
+  const persistNow = useCallback((board?: Card[]) => {
     try {
       localStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify({ cards: cardsRef.current, base: baseRef.current })
+        JSON.stringify({ cards: board ?? cardsRef.current })
       );
     } catch {
       /* storage unavailable */
     }
   }, []);
 
+  const applyBoard = useCallback(
+    (board: Card[]) => {
+      cardsRef.current = board;
+      setCards(board);
+      persistNow(board);
+    },
+    [persistNow]
+  );
+
   // ── Restore this device's board once, on mount ──────────────────────
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
-        const parsed = JSON.parse(raw) as {
-          cards?: Partial<Card>[];
-          base?: Partial<Card>[];
-        };
+        const parsed = JSON.parse(raw) as { cards?: Partial<Card>[] };
         if (parsed?.cards?.length) {
           const restored = mergeCards(DEFAULT_CARDS, parsed.cards);
           cardsRef.current = restored;
           setCards(restored);
         }
-        // If we have a saved base, this device has synced before — trust it.
-        // If not (first run, maybe used offline), use an EMPTY base so our local
-        // content counts as "ours" and won't be wiped by an empty cloud.
-        baseRef.current = parsed.base?.length
-          ? mergeCards(DEFAULT_CARDS, parsed.base)
-          : DEFAULT_CARDS;
       }
     } catch {
       /* ignore unreadable data */
@@ -226,151 +159,110 @@ export default function Home() {
     return () => sub.subscription.unsubscribe();
   }, []);
 
-  // Push the current board to the cloud. After it lands, the cloud and this
-  // device agree → the snapshot becomes our new base.
-  const pushRemote = useCallback(async () => {
+  // Pull the latest board from the cloud (read-only — never writes, except to
+  // seed an empty cloud the very first time).
+  const pullRemote = useCallback(async () => {
     const sb = supabase;
     const uid = userIdRef.current;
     if (!sb || !uid) return;
-    const snapshot = cardsRef.current;
-    setPushing(true);
     try {
-      await sb.from("buffers").upsert({
-        user_id: uid,
-        content: JSON.stringify({ cards: snapshot }),
-        updated_at: new Date().toISOString(),
-      });
-      baseRef.current = snapshot;
-      persistNow();
+      const { data } = await sb
+        .from("buffers")
+        .select("content")
+        .eq("user_id", uid)
+        .maybeSingle();
+      if (data?.content) {
+        let cloudCards: Partial<Card>[] = [];
+        try {
+          cloudCards =
+            (JSON.parse(data.content) as { cards?: Partial<Card>[] }).cards ?? [];
+        } catch {
+          /* ignore malformed remote */
+        }
+        if (cloudCards.length) applyBoard(mergeCards(DEFAULT_CARDS, cloudCards));
+      } else {
+        // No cloud row yet → seed it once with whatever this device has.
+        await sb.from("buffers").upsert({
+          user_id: uid,
+          content: JSON.stringify({ cards: cardsRef.current }),
+          updated_at: new Date().toISOString(),
+        });
+      }
     } catch {
-      /* stay silent — the local copy is always safe */
+      /* offline or not set up — local copy still works */
     }
-    setPushing(false);
-  }, [persistNow]);
+  }, [applyBoard]);
 
-  // Apply a board that arrived from the cloud (another device, or first load).
-  const applyRemote = useCallback((content: string) => {
-    try {
-      const inc = JSON.parse(content) as { cards?: Partial<Card>[] };
-      const remoteCards = inc.cards ?? [];
-      if (!remoteCards.length) return;
-      const remoteBoard = mergeCards(DEFAULT_CARDS, remoteCards);
-      // Nothing changed remotely since we last agreed (this is our own echo, or
-      // a stale repeat) → ignore it so in-progress edits are never reverted.
-      if (boardSig(remoteBoard) === boardSig(baseRef.current)) return;
-      const merged = mergeRemote(baseRef.current, cardsRef.current, remoteCards);
-      baseRef.current = remoteBoard;
-      cardsRef.current = merged;
-      setCards(merged);
-      // If we kept any local edits the cloud hasn't seen, the persist effect
-      // below will notice (board ≠ base) and push them.
-    } catch {
-      /* ignore malformed remote content */
-    }
-  }, []);
+  // Apply a board pushed by another device (realtime).
+  const applyRemote = useCallback(
+    (content: string) => {
+      try {
+        const cloudCards =
+          (JSON.parse(content) as { cards?: Partial<Card>[] }).cards ?? [];
+        if (!cloudCards.length) return;
+        applyBoard(mergeCards(DEFAULT_CARDS, cloudCards));
+      } catch {
+        /* ignore malformed remote content */
+      }
+    },
+    [applyBoard]
+  );
 
-  // ── When signed in: reconcile once, then subscribe to live changes ──
+  // ── When signed in: pull once, then subscribe to live changes ───────
   useEffect(() => {
     const sb = supabase;
     if (!sb || !hydrated || !userEmail) return;
     const uid = userIdRef.current;
     if (!uid) return;
 
-    let cancelled = false;
     let channel: ReturnType<typeof sb.channel> | null = null;
-
-    (async () => {
-      try {
-        const { data } = await sb
-          .from("buffers")
-          .select("content")
-          .eq("user_id", uid)
-          .maybeSingle();
-        if (cancelled) return;
-        if (data?.content) {
-          let remoteCards: Partial<Card>[] = [];
-          try {
-            remoteCards =
-              (JSON.parse(data.content) as { cards?: Partial<Card>[] }).cards ?? [];
-          } catch {
-            /* ignore malformed remote */
-          }
-          if (remoteCards.length) {
-            const merged = mergeRemote(baseRef.current, cardsRef.current, remoteCards);
-            baseRef.current = mergeCards(DEFAULT_CARDS, remoteCards);
-            cardsRef.current = merged;
-            setCards(merged);
-          }
+    pullRemote();
+    channel = sb
+      .channel(`buffers-${uid}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "buffers", filter: `user_id=eq.${uid}` },
+        (payload) => {
+          const row = payload.new as { content?: string } | null;
+          if (row?.content) applyRemote(row.content);
         }
-        // Always upload the result so the cloud holds the merged union and our
-        // base matches what we just pushed.
-        await pushRemote();
-      } catch {
-        /* offline or not set up yet — local still works */
-      }
-
-      if (cancelled) return;
-      channel = sb
-        .channel(`buffers-${uid}`)
-        .on(
-          "postgres_changes",
-          { event: "*", schema: "public", table: "buffers", filter: `user_id=eq.${uid}` },
-          (payload) => {
-            const row = payload.new as { content?: string } | null;
-            if (row?.content) applyRemote(row.content);
-          }
-        )
-        .subscribe();
-    })();
+      )
+      .subscribe();
 
     return () => {
-      cancelled = true;
       if (channel) sb.removeChannel(channel);
     };
-  }, [userEmail, hydrated, applyRemote, pushRemote]);
+  }, [userEmail, hydrated, pullRemote, applyRemote]);
 
-  // ── Persist on every change: instant local + debounced remote ───────
+  // ── Refresh from the cloud whenever the app comes back into view ────
+  // (covers any realtime event missed while the tab/app was backgrounded).
   useEffect(() => {
-    if (!hydrated) return;
-    persistNow();
-    if (supabase && userEmail && online) {
-      // Push only when our board differs from what the cloud last agreed on.
-      if (boardSig(cards) !== boardSig(baseRef.current)) {
-        if (pushTimer.current) clearTimeout(pushTimer.current);
-        pushTimer.current = setTimeout(() => pushRemote(), 400);
-      }
-    }
-    return () => {
-      if (pushTimer.current) clearTimeout(pushTimer.current);
+    if (!userEmail) return;
+    const refresh = () => {
+      if (document.visibilityState === "visible") pullRemote();
     };
-  }, [cards, hydrated, userEmail, online, pushRemote, persistNow]);
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [userEmail, pullRemote]);
 
-  const onText = useCallback((id: string, text: string) => {
-    setCards((prev) => prev.map((c) => (c.id === id ? { ...c, text } : c)));
-  }, []);
-
-  const onTextTop = useCallback((id: string, text: string) => {
-    setCards((prev) => prev.map((c) => (c.id === id ? { ...c, textTop: text } : c)));
-  }, []);
-
-  const onAttach = useCallback(async (id: string, file: File) => {
-    const prevCard = cardsRef.current.find((c) => c.id === id);
+  // Upload a file to cloud storage (+ keep a fast local copy) and return the
+  // media fields for the card draft. Does NOT touch the board — the draft only
+  // becomes real when the user hits Save.
+  const onUpload = useCallback(async (file: File): Promise<Partial<Card>> => {
     const key = newKey();
-    setPushing(true);
     try {
-      await idbPut(key, file); // fast local copy
+      await idbPut(key, file);
     } catch {
-      /* local store failed; the cloud upload below may still succeed */
+      /* local store failed; the cloud copy below may still succeed */
     }
-    if (prevCard?.mediaKey && prevCard.mediaKey !== key) {
-      idbDel(prevCard.mediaKey).catch(() => {});
-    }
-
     const isImage = file.type.startsWith("image/");
     const isVideo = file.type.startsWith("video/");
     const kind: "image" | "video" | "file" = isImage ? "image" : isVideo ? "video" : "file";
 
-    // Upload the actual file to cloud storage so OTHER devices can load it.
     let mediaUrl: string | undefined;
     let mediaPath: string | undefined;
     const sb = supabase;
@@ -380,12 +272,10 @@ export default function Home() {
         const ext =
           (file.name.split(".").pop() || "bin").replace(/[^a-zA-Z0-9]/g, "").slice(0, 8) || "bin";
         const path = `${uid}/${key}.${ext}`;
-        const { error } = await sb.storage
-          .from("media")
-          .upload(path, file, {
-            contentType: file.type || "application/octet-stream",
-            upsert: true,
-          });
+        const { error } = await sb.storage.from("media").upload(path, file, {
+          contentType: file.type || "application/octet-stream",
+          upsert: true,
+        });
         if (!error) {
           mediaPath = path;
           mediaUrl = sb.storage.from("media").getPublicUrl(path).data.publicUrl;
@@ -394,76 +284,71 @@ export default function Home() {
         /* upload failed — media stays available on this device only */
       }
     }
-    if (prevCard?.mediaPath && prevCard.mediaPath !== mediaPath && sb) {
-      sb.storage.from("media").remove([prevCard.mediaPath]).catch(() => {});
-    }
-
-    setCards((prev) =>
-      prev.map((c) =>
-        c.id === id
-          ? {
-              ...c,
-              kind,
-              mediaKey: key,
-              mediaUrl,
-              mediaPath,
-              mediaName: file.name,
-              mediaType: file.type,
-              mediaSize: file.size,
-            }
-          : c
-      )
-    );
-    setPushing(false);
+    return {
+      kind,
+      mediaKey: key,
+      mediaUrl,
+      mediaPath,
+      mediaName: file.name,
+      mediaType: file.type,
+      mediaSize: file.size,
+    };
   }, []);
 
-  const onLink = useCallback((id: string, url: string) => {
-    const prevCard = cardsRef.current.find((c) => c.id === id);
-    if (prevCard?.mediaKey) idbDel(prevCard.mediaKey).catch(() => {});
-    setCards((prev) =>
-      prev.map((c) =>
-        c.id === id
-          ? {
-              ...c,
-              kind: "link",
-              linkUrl: url,
-              mediaKey: undefined,
-              mediaName: undefined,
-              mediaType: undefined,
-              mediaSize: undefined,
-            }
-          : c
-      )
-    );
-  }, []);
+  // Commit one card's draft. This is the ONLY thing that writes to the cloud.
+  // We re-read the freshest cloud board first so saving one card never clobbers
+  // another card with stale data, then write our card on top. Last save wins.
+  const onSave = useCallback(
+    async (id: string, fields: Partial<Card>) => {
+      const layout = DEFAULT_CARDS.find((d) => d.id === id) ?? DEFAULT_CARDS[0];
+      const commit = (board: Card[]) =>
+        board.map((c) => (c.id === id ? { ...layout, ...c, ...fields } : c));
 
-  // Erase a whole card (text + media + cloud copy). Triggered with a confirm.
-  const onWipe = useCallback((id: string) => {
-    const prevCard = cardsRef.current.find((c) => c.id === id);
-    if (prevCard?.mediaKey) idbDel(prevCard.mediaKey).catch(() => {});
-    if (prevCard?.mediaPath && supabase) {
-      supabase.storage.from("media").remove([prevCard.mediaPath]).catch(() => {});
-    }
-    setCards((prev) =>
-      prev.map((c) =>
-        c.id === id
-          ? {
-              ...c,
-              kind: "text",
-              text: "",
-              textTop: undefined,
-              linkUrl: undefined,
-              mediaKey: undefined,
-              mediaUrl: undefined,
-              mediaPath: undefined,
-              mediaName: undefined,
-              mediaType: undefined,
-              mediaSize: undefined,
-            }
-          : c
-      )
-    );
-  }, []);
+      // Clean up media we're replacing or removing (best-effort).
+      const prev = cardsRef.current.find((c) => c.id === id);
+      if (prev?.mediaPath && prev.mediaPath !== fields.mediaPath && supabase) {
+        supabase.storage.from("media").remove([prev.mediaPath]).catch(() => {});
+      }
+      if (prev?.mediaKey && prev.mediaKey !== fields.mediaKey) {
+        idbDel(prev.mediaKey).catch(() => {});
+      }
+
+      // Optimistic local update so the card updates instantly.
+      applyBoard(commit(cardsRef.current));
+
+      const sb = supabase;
+      const uid = userIdRef.current;
+      if (!sb || !uid) return; // signed out → local only
+      setSaving(true);
+      try {
+        const { data } = await sb
+          .from("buffers")
+          .select("content")
+          .eq("user_id", uid)
+          .maybeSingle();
+        let board = cardsRef.current;
+        if (data?.content) {
+          try {
+            const cloudCards =
+              (JSON.parse(data.content) as { cards?: Partial<Card>[] }).cards ?? [];
+            if (cloudCards.length) board = commit(mergeCards(DEFAULT_CARDS, cloudCards));
+          } catch {
+            /* ignore malformed remote */
+          }
+        }
+        applyBoard(board);
+        await sb.from("buffers").upsert({
+          user_id: uid,
+          content: JSON.stringify({ cards: board }),
+          updated_at: new Date().toISOString(),
+        });
+      } catch {
+        /* push failed — local copy is safe; next save/refresh will reconcile */
+      }
+      setSaving(false);
+    },
+    [applyBoard]
+  );
 
   async function signOut() {
     try {
@@ -475,10 +360,10 @@ export default function Home() {
 
   // Derive the status light from sign-in + connectivity + activity.
   let status: SyncStatus = "local";
-  if (userEmail) status = !online ? "offline" : pushing ? "syncing" : "synced";
+  if (userEmail) status = !online ? "offline" : saving ? "saving" : "synced";
   const statusLabel = status.toUpperCase();
   const dotClass =
-    status === "syncing"
+    status === "saving"
       ? "bg-status-syncing"
       : status === "offline"
         ? "bg-status-offline"
@@ -518,13 +403,9 @@ export default function Home() {
           <CardView
             card={big}
             tilt={TILT[big.id] ?? { card: 0, stamp: -4 }}
-            autoFocus
             className="sm:col-span-2 sm:row-span-3"
-            onText={onText}
-            onTextTop={onTextTop}
-            onAttach={onAttach}
-            onLink={onLink}
-            onWipe={onWipe}
+            onSave={onSave}
+            onUpload={onUpload}
           />
           {smalls.map((c) => (
             <CardView
@@ -532,11 +413,8 @@ export default function Home() {
               card={c}
               tilt={TILT[c.id] ?? { card: 0, stamp: -4 }}
               className="sm:col-span-1"
-              onText={onText}
-              onTextTop={onTextTop}
-              onAttach={onAttach}
-              onLink={onLink}
-              onWipe={onWipe}
+              onSave={onSave}
+              onUpload={onUpload}
             />
           ))}
         </div>
