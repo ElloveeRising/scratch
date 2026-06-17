@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Courier_Prime } from "next/font/google";
 import "./globals.css";
 
@@ -12,7 +12,24 @@ const font = Courier_Prime({
 
 export const metadata: Metadata = {
   title: "Scratch Pad",
-  description: "A frictionless scratchpad",
+  description: "A frictionless cross-device scratchpad.",
+  applicationName: "Scratch Pad",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    title: "Scratch Pad",
+    statusBarStyle: "black-translucent",
+  },
+  // Next emits the modern `mobile-web-app-capable`; add the legacy Apple tag too
+  // so older iOS also launches standalone from the home screen.
+  other: {
+    "apple-mobile-web-app-capable": "yes",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#6e4c2c",
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
