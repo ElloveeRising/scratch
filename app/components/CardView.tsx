@@ -28,30 +28,6 @@ export interface Card {
 // so they stay on this device only.
 const CHUNK_CEILING = 500 * 1024 * 1024;
 
-// Minimal shape of the Web Speech API we use (it isn't in the TS DOM lib).
-interface SpeechRec {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  onresult:
-    | ((e: { results: { length: number; [i: number]: { [j: number]: { transcript: string } } } }) => void)
-    | null;
-  onend: (() => void) | null;
-  onerror: (() => void) | null;
-  start: () => void;
-  stop: () => void;
-}
-type SpeechRecCtor = new () => SpeechRec;
-
-function getSpeechRecCtor(): SpeechRecCtor | null {
-  if (typeof window === "undefined") return null;
-  const w = window as unknown as {
-    SpeechRecognition?: SpeechRecCtor;
-    webkitSpeechRecognition?: SpeechRecCtor;
-  };
-  return w.SpeechRecognition || w.webkitSpeechRecognition || null;
-}
-
 // Content signature — the fields that actually sync. Excludes device-local
 // `mediaKey` so the same media isn't seen as a change across devices. Used to
 // tell whether a card has unsaved local edits ("dirty").
@@ -112,17 +88,8 @@ export default function CardView({ card, tilt, className = "", onSave, onUpload,
   const [uploadMsg, setUploadMsg] = useState(""); // attach / save progress
   const [loadMsg, setLoadMsg] = useState<string | null>(null); // chunk-download progress
 
-  const [listening, setListening] = useState(false);
-  const [canDictate, setCanDictate] = useState(false);
-  const recRef = useRef<SpeechRec | null>(null);
-  const dictBaseRef = useRef("");
-
   const dirty = sig(draft) !== sig(baseRef.current);
   const isMedia = draft.kind === "image" || draft.kind === "video" || draft.kind === "file";
-
-  useEffect(() => {
-    setCanDictate(!!getSpeechRecCtor());
-  }, []);
 
   // Adopt incoming synced content ONLY when there are no unsaved edits. While
   // dirty, hold our draft so a sync from the other device can't wipe what
@@ -203,35 +170,13 @@ export default function CardView({ card, tilt, className = "", onSave, onUpload,
     };
   }, [isMedia, draft.mediaKey, draft.mediaChunks, draft.mediaPath, draft.mediaType]);
 
-  // Release the mic if the card unmounts mid-dictation.
-  useEffect(() => {
-    return () => {
-      try {
-        recRef.current?.stop();
-      } catch {
-        /* ignore */
-      }
-    };
-  }, []);
-
   const src = objUrl || draft.mediaUrl || null;
 
   function patch(p: Partial<Card>) {
     setDraft({ ...draftRef.current, ...p });
   }
 
-  function stopDictation() {
-    try {
-      recRef.current?.stop();
-    } catch {
-      /* ignore */
-    }
-    recRef.current = null;
-    setListening(false);
-  }
-
   async function save() {
-    stopDictation();
     const d = draftRef.current;
     baseRef.current = d; // optimistic: we're clean at this content now
     setBusy(true);
@@ -255,7 +200,6 @@ export default function CardView({ card, tilt, className = "", onSave, onUpload,
   }
 
   function revert() {
-    stopDictation();
     baseRef.current = card;
     setDraft(card);
     setTooBig(false);
@@ -290,41 +234,6 @@ export default function CardView({ card, tilt, className = "", onSave, onUpload,
       mediaSize: undefined,
       mediaChunks: undefined,
     });
-  }
-
-  function toggleDictation() {
-    if (listening) {
-      stopDictation();
-      return;
-    }
-    const Ctor = getSpeechRecCtor();
-    if (!Ctor) return;
-    const rec = new Ctor();
-    rec.lang = "en-US";
-    rec.continuous = true;
-    rec.interimResults = true;
-    dictBaseRef.current = (draftRef.current.text ?? "").trim();
-    rec.onresult = (e) => {
-      let transcript = "";
-      for (let i = 0; i < e.results.length; i++) transcript += e.results[i][0].transcript;
-      const base = dictBaseRef.current;
-      patch({ text: base ? `${base} ${transcript}` : transcript });
-    };
-    rec.onend = () => {
-      recRef.current = null;
-      setListening(false);
-    };
-    rec.onerror = () => {
-      recRef.current = null;
-      setListening(false);
-    };
-    try {
-      rec.start();
-      recRef.current = rec;
-      setListening(true);
-    } catch {
-      /* mic unavailable / permission denied */
-    }
   }
 
   function handleDrop(e: React.DragEvent) {
@@ -555,17 +464,6 @@ export default function CardView({ card, tilt, className = "", onSave, onUpload,
               title="Remove the media/link"
             >
               ✕ remove
-            </button>
-          )}
-          {canDictate && (
-            <button
-              type="button"
-              className={`bar-btn ${listening ? "is-live" : ""}`}
-              onClick={toggleDictation}
-              disabled={busy}
-              title="Dictate with your voice"
-            >
-              {listening ? "● listening" : "🎤 speak"}
             </button>
           )}
         </div>

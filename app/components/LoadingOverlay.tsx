@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 
-// Library-flavored lines that cycle for personality while the real status
-// (e.g. "uploading 3/12…") stays put below.
+// Library-flavored lines that cycle (at random) for personality while the real
+// status (e.g. "uploading 3/12…") stays put below. There are a lot of them on
+// purpose — it should take a good long while before you see a repeat.
 const FLAVOR = [
   "Cross-referencing the card catalog…",
   "Consulting the Dewey Decimal System…",
@@ -12,6 +13,49 @@ const FLAVOR = [
   "Shushing the other patrons…",
   "Re-shelving by subject…",
   "Alphabetizing with great vigor…",
+  "Untangling a tentacle from the card drawer…",
+  "Licking a stamp (eight at once)…",
+  "Squinting at some very small print…",
+  "Adjusting his little glasses…",
+  "Renewing your library card…",
+  "Dusting the encyclopedias…",
+  "Deciphering someone’s handwriting…",
+  "Pressing a flower between the pages…",
+  "Wheeling the ladder to the top shelf…",
+  "Whispering the call number…",
+  "Sorting fact from fiction…",
+  "Checking the returns bin…",
+  "Polishing the reading lamp…",
+  "Sharpening eight pencils at once…",
+  "Refilling the ink pot…",
+  "Finding your card in the Q drawer…",
+  "Translating from the original…",
+  "Colour-coding the index tabs…",
+  "Reuniting a bookmark with its book…",
+  "Counting to a very large number…",
+  "Misplacing, then finding, his spectacles…",
+  "Filing a complaint about the filing…",
+  "Cataloguing the catalogue…",
+  "Wheeling the book cart very quietly…",
+  "Reading ahead (no spoilers)…",
+  "Brewing a tiny cup of tea…",
+  "Negotiating with a stubborn drawer…",
+  "Tut-tutting at a dog-eared page…",
+  "Recommending a good mystery…",
+  "Stacking cards with suspicious confidence…",
+  "Indexing purely by feel…",
+  "Befriending a library mouse…",
+  "Filing it under ‘F’ for ‘finally’…",
+  "Tidying all eight sleeves…",
+  "Double-checking the spelling…",
+  "Adding a fresh due-date card…",
+  "Humming the alphabet, quietly…",
+  "Blowing dust off the microfiche…",
+  "Rescuing a card from the wrong drawer…",
+  "Consulting a second, smaller octopus…",
+  "Wrestling a roll of packing tape…",
+  "Pretending he knew where that was…",
+  "Putting on his serious reading face…",
 ];
 
 export default function LoadingOverlay({
@@ -23,7 +67,14 @@ export default function LoadingOverlay({
 }) {
   const [flavor, setFlavor] = useState(0);
   useEffect(() => {
-    const t = setInterval(() => setFlavor((f) => (f + 1) % FLAVOR.length), 2600);
+    const t = setInterval(() => {
+      setFlavor((f) => {
+        if (FLAVOR.length < 2) return 0;
+        let n = f;
+        while (n === f) n = Math.floor(Math.random() * FLAVOR.length);
+        return n;
+      });
+    }, 2600);
     return () => clearInterval(t);
   }, []);
 
