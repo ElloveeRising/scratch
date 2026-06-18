@@ -1005,15 +1005,16 @@
   }
 
   /* ── Phone: readable text + finger-friendly buttons ──────────────── */
+  /* Every text field MUST be >= 16px or iOS Safari auto-zooms on focus — which
+     was shoving the Save button off-screen and breaking scroll. `!important`
+     beats both the Tailwind text-[..] utilities (a later @layer) and the
+     .card.is-big .caption rule, which the plain rule could not. */
   @media (max-width: 640px) {
-    .card.is-big textarea {
+    .card textarea {
+      font-size: 16px !important;
+    }
+    .connect-input {
       font-size: 16px;
-    }
-    .card.is-small textarea {
-      font-size: 15px;
-    }
-    .caption {
-      font-size: 14px;
     }
     .bar-btn {
       font-size: 12px;
