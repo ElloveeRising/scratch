@@ -34,9 +34,40 @@ function newKey(): string {
   return `m-${Date.now()}-${Math.round(Math.random() * 1e9)}`;
 }
 
-// Supabase free tier rejects single uploads over 50MB. Anything bigger skips the
-// (doomed) cloud upload and stays on-device only, so attaching never hangs.
-const MAX_SYNC_BYTES = 50 * 1024 * 1024;
+// Supabase free tier rejects single uploads over 50MB — so big media is split
+// into sub-cap chunks and reassembled on the other device (full quality, free).
+const MAX_SYNC_BYTES = 50 * 1024 * 1024; // free per-file cap
+const CHUNK_BYTES = 45 * 1024 * 1024; // size of each chunk (safely under the cap)
+const CHUNK_CEILING = 500 * 1024 * 1024; // beyond this, keep on-device only (free total ~1GB)
+const IMG_COMPRESS_OVER = 5 * 1024 * 1024; // re-encode images larger than this
+const IMG_MAX_DIM = 3200; // longest side (px) after downscale
+
+// Downscale + re-encode a large image to WebP at high quality (near-lossless to
+// the eye) so it uploads fast and sips storage. Returns null to keep the original.
+async function compressImage(file: File): Promise<{ blob: Blob; type: string } | null> {
+  try {
+    const bmp = await createImageBitmap(file);
+    const longest = Math.max(bmp.width, bmp.height);
+    const scale = longest > IMG_MAX_DIM ? IMG_MAX_DIM / longest : 1;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bmp.width * scale);
+    canvas.height = Math.round(bmp.height * scale);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      bmp.close();
+      return null;
+    }
+    ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    bmp.close();
+    const blob = await new Promise<Blob | null>((res) =>
+      canvas.toBlob((b) => res(b), "image/webp", 0.85)
+    );
+    if (blob && blob.size < file.size) return { blob, type: "image/webp" };
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 // ── Sync model: explicit save, single writer at a time ──────────────────
 // The old continuous merge fought itself: every keystroke and even just
@@ -76,6 +107,7 @@ function mergeCards(base: Card[], saved: Partial<Card>[]): Card[] {
       mediaName: hit.mediaName,
       mediaType: hit.mediaType,
       mediaSize: hit.mediaSize,
+      mediaChunks: hit.mediaChunks,
     };
   });
 }
@@ -255,51 +287,100 @@ export default function Home() {
     };
   }, [userEmail, pullRemote]);
 
-  // Upload a file to cloud storage (+ keep a fast local copy) and return the
-  // media fields for the card draft. Does NOT touch the board — the draft only
-  // becomes real when the user hits Save.
-  const onUpload = useCallback(async (file: File): Promise<Partial<Card>> => {
-    const key = newKey();
-    try {
-      await idbPut(key, file);
-    } catch {
-      /* local store failed; the cloud copy below may still succeed */
-    }
-    const isImage = file.type.startsWith("image/");
-    const isVideo = file.type.startsWith("video/");
-    const kind: "image" | "video" | "file" = isImage ? "image" : isVideo ? "video" : "file";
+  // Upload a file and return the media fields for the card draft. Compresses
+  // large images; splits anything still over the per-file cap into sub-cap
+  // chunks (reassembled on the other device, full quality). Keeps a fast local
+  // copy. Does NOT touch the board — the draft only becomes real on Save.
+  // `onProgress` reports steps for the UI.
+  const onUpload = useCallback(
+    async (file: File, onProgress?: (msg: string) => void): Promise<Partial<Card>> => {
+      const key = newKey();
+      const isImage = file.type.startsWith("image/");
+      const isVideo = file.type.startsWith("video/");
+      const kind: "image" | "video" | "file" = isImage ? "image" : isVideo ? "video" : "file";
 
-    let mediaUrl: string | undefined;
-    let mediaPath: string | undefined;
-    const sb = supabase;
-    const uid = userIdRef.current;
-    if (sb && uid && file.size <= MAX_SYNC_BYTES) {
-      try {
-        const ext =
-          (file.name.split(".").pop() || "bin").replace(/[^a-zA-Z0-9]/g, "").slice(0, 8) || "bin";
-        const path = `${uid}/${key}.${ext}`;
-        const { error } = await sb.storage.from("media").upload(path, file, {
-          contentType: file.type || "application/octet-stream",
-          upsert: true,
-        });
-        if (!error) {
-          mediaPath = path;
-          mediaUrl = sb.storage.from("media").getPublicUrl(path).data.publicUrl;
+      // 1. Compress large images (near-lossless) before storing/uploading.
+      let blob: Blob = file;
+      let mediaType = file.type || "application/octet-stream";
+      if (isImage && file.size > IMG_COMPRESS_OVER) {
+        onProgress?.("optimizing image…");
+        const c = await compressImage(file);
+        if (c) {
+          blob = c.blob;
+          mediaType = c.type;
         }
-      } catch {
-        /* upload failed — media stays available on this device only */
       }
-    }
-    return {
-      kind,
-      mediaKey: key,
-      mediaUrl,
-      mediaPath,
-      mediaName: file.name,
-      mediaType: file.type,
-      mediaSize: file.size,
-    };
-  }, []);
+
+      // 2. Keep a fast local copy on THIS device.
+      try {
+        await idbPut(key, blob);
+      } catch {
+        /* local store failed; the cloud copy below may still succeed */
+      }
+
+      const base: Partial<Card> = {
+        kind,
+        mediaKey: key,
+        mediaName: file.name,
+        mediaType,
+        mediaSize: blob.size,
+      };
+
+      const sb = supabase;
+      const uid = userIdRef.current;
+      if (!sb || !uid) return base; // signed out → local only
+
+      // 3a. Fits in one piece → single upload (the common case).
+      if (blob.size <= MAX_SYNC_BYTES) {
+        try {
+          onProgress?.("uploading…");
+          const ext =
+            (file.name.split(".").pop() || "bin").replace(/[^a-zA-Z0-9]/g, "").slice(0, 8) || "bin";
+          const path = `${uid}/${key}.${ext}`;
+          const { error } = await sb.storage
+            .from("media")
+            .upload(path, blob, { contentType: mediaType, upsert: true });
+          if (!error) {
+            return {
+              ...base,
+              mediaPath: path,
+              mediaUrl: sb.storage.from("media").getPublicUrl(path).data.publicUrl,
+            };
+          }
+        } catch {
+          /* fall through to local-only */
+        }
+        return base;
+      }
+
+      // 3b. Over the cap but within reason → split into sub-cap chunks.
+      if (blob.size <= CHUNK_CEILING) {
+        try {
+          const count = Math.ceil(blob.size / CHUNK_BYTES);
+          const chunkBase = `${uid}/${key}`;
+          for (let i = 0; i < count; i++) {
+            onProgress?.(`uploading ${i + 1}/${count}…`);
+            const part = blob.slice(i * CHUNK_BYTES, (i + 1) * CHUNK_BYTES);
+            const { error } = await sb.storage
+              .from("media")
+              .upload(`${chunkBase}.part${i}`, part, {
+                contentType: "application/octet-stream",
+                upsert: true,
+              });
+            if (error) throw error;
+          }
+          return { ...base, mediaPath: chunkBase, mediaChunks: count };
+        } catch {
+          /* a chunk failed — keep on-device only */
+        }
+        return base;
+      }
+
+      // 3c. Beyond what the free tier can hold — keep on this device only.
+      return base;
+    },
+    []
+  );
 
   // Commit one card's draft. This is the ONLY thing that writes to the cloud.
   // We re-read the freshest cloud board first so saving one card never clobbers
@@ -310,10 +391,16 @@ export default function Home() {
       const commit = (board: Card[]) =>
         board.map((c) => (c.id === id ? { ...layout, ...c, ...fields } : c));
 
-      // Clean up media we're replacing or removing (best-effort).
+      // Clean up media we're replacing or removing (best-effort; chunked media
+      // leaves N part objects, so remove them all).
       const prev = cardsRef.current.find((c) => c.id === id);
       if (prev?.mediaPath && prev.mediaPath !== fields.mediaPath && supabase) {
-        supabase.storage.from("media").remove([prev.mediaPath]).catch(() => {});
+        const prevChunks = prev.mediaChunks ?? 0;
+        const paths =
+          prevChunks > 1
+            ? Array.from({ length: prevChunks }, (_, i) => `${prev.mediaPath}.part${i}`)
+            : [prev.mediaPath];
+        supabase.storage.from("media").remove(paths).catch(() => {});
       }
       if (prev?.mediaKey && prev.mediaKey !== fields.mediaKey) {
         idbDel(prev.mediaKey).catch(() => {});

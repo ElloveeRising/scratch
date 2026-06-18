@@ -76,9 +76,11 @@ export default function ShareModal({ card, onClose }: { card: Card; onClose: () 
             textTop: card.textTop ?? "",
             linkUrl: card.linkUrl ?? "",
             mediaUrl: card.mediaUrl ?? "",
+            mediaPath: card.mediaPath ?? "",
             mediaName: card.mediaName ?? "",
             mediaType: card.mediaType ?? "",
             mediaSize: card.mediaSize ?? 0,
+            mediaChunks: card.mediaChunks ?? 0,
           },
         };
         const path = `${uid}/shares/${slug}.json`;

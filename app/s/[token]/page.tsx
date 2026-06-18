@@ -10,9 +10,11 @@ interface SharedCard {
   textTop: string;
   linkUrl: string;
   mediaUrl: string;
+  mediaPath: string;
   mediaName: string;
   mediaType: string;
   mediaSize: number;
+  mediaChunks: number;
 }
 
 // Fetch a shared card snapshot from the public media bucket. `cache` dedupes
@@ -77,6 +79,11 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
   const isFile = card.kind === "file" && card.mediaUrl;
   const isLink = card.kind === "link" && (card.linkUrl || card.text);
   const isMedia = isImage || isVideo || isFile;
+  // Chunked media has no single URL — too large to reassemble on a public page.
+  const isChunked =
+    (card.kind === "image" || card.kind === "video" || card.kind === "file") &&
+    !card.mediaUrl &&
+    (card.mediaChunks ?? 0) > 1;
   const link = isLink ? parseLink(card.linkUrl || card.text) : null;
 
   return (
@@ -116,6 +123,18 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
           </div>
         ) : null}
 
+        {isChunked ? (
+          <div className="media-wrap">
+            <div className="file-chip file-chip-missing">
+              <span className="file-ico">▤</span>
+              <span className="file-meta">
+                <span className="file-name">{card.mediaName || `large ${card.kind}`}</span>
+                <span className="file-size">large {card.kind} — open in Scratch Pad to view</span>
+              </span>
+            </div>
+          </div>
+        ) : null}
+
         {isLink && link ? (
           <div className="media-wrap link-wrap">
             {link.embedUrl ? (
@@ -142,7 +161,7 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
           <div className="card-text-view flex-1 w-full text-[15px] leading-[27px] pt-[27px] pl-[60px] pr-6">
             {card.text || ""}
           </div>
-        ) : card.text && (isMedia || isLink) ? (
+        ) : card.text && (isMedia || isLink || isChunked) ? (
           <div className="caption">{card.text}</div>
         ) : null}
 

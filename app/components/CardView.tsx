@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { idbGet } from "../lib/idb";
 import { parseLink } from "../lib/links";
+import { publicMediaUrl } from "../lib/supabase";
 
 export type Kind = "text" | "image" | "video" | "file" | "link";
 
@@ -15,16 +16,17 @@ export interface Card {
   textTop?: string; // top note for media cards (big card only)
   linkUrl?: string; // URL for link cards
   mediaKey?: string; // IndexedDB key for a local copy of the blob
-  mediaUrl?: string; // cloud URL — how OTHER devices load this media
-  mediaPath?: string; // storage path (for deletion)
+  mediaUrl?: string; // cloud URL — how OTHER devices load single-file media
+  mediaPath?: string; // storage path (single file), or chunk base path if chunked
   mediaName?: string;
   mediaType?: string;
   mediaSize?: number;
+  mediaChunks?: number; // if >1, media is split into N chunks at `${mediaPath}.part{i}`
 }
 
-// Supabase free tier rejects single uploads over 50MB. Until chunked uploads
-// land, anything bigger is kept on-device only (no long doomed upload).
-const MAX_SYNC_BYTES = 50 * 1024 * 1024;
+// Files bigger than this can't be synced even by chunking (free total is ~1GB),
+// so they stay on this device only.
+const CHUNK_CEILING = 500 * 1024 * 1024;
 
 // Minimal shape of the Web Speech API we use (it isn't in the TS DOM lib).
 interface SpeechRec {
@@ -64,6 +66,7 @@ function sig(c: Card): string {
     c.mediaName ?? "",
     c.mediaType ?? "",
     c.mediaSize ?? 0,
+    c.mediaChunks ?? 0,
   ]);
 }
 
@@ -74,7 +77,8 @@ interface Props {
   // Commit this card's draft to state + cloud. The ONLY write path.
   onSave: (id: string, fields: Partial<Card>) => Promise<void> | void;
   // Upload a file and return the media fields for the draft (no commit).
-  onUpload: (file: File) => Promise<Partial<Card> | null>;
+  // `onProgress` reports steps (compressing / uploading 3/12) for the UI.
+  onUpload: (file: File, onProgress?: (msg: string) => void) => Promise<Partial<Card> | null>;
   // If provided, show a Share button (used only on the one shareable card).
   onShare?: () => void;
 }
@@ -105,6 +109,8 @@ export default function CardView({ card, tilt, className = "", onSave, onUpload,
   const [tooBig, setTooBig] = useState(false);
   const [objUrl, setObjUrl] = useState<string | null>(null);
   const [checked, setChecked] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState(""); // attach / save progress
+  const [loadMsg, setLoadMsg] = useState<string | null>(null); // chunk-download progress
 
   const [listening, setListening] = useState(false);
   const [canDictate, setCanDictate] = useState(false);
@@ -131,33 +137,71 @@ export default function CardView({ card, tilt, className = "", onSave, onUpload,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cardSig]);
 
-  // Load a fast local copy from IndexedDB if present; else fall back to cloud URL.
+  // Resolve the media to show: prefer this device's local copy (instant); else,
+  // if it was uploaded in chunks, fetch + stitch the parts back together; else
+  // fall back to the single cloud URL (handled by `src`).
   useEffect(() => {
     let cancelled = false;
     let url: string | null = null;
     setChecked(false);
     setObjUrl(null);
-    if (isMedia && draft.mediaKey) {
-      idbGet(draft.mediaKey)
-        .then((blob) => {
+    setLoadMsg(null);
+    const chunks = draft.mediaChunks ?? 0;
+    (async () => {
+      if (!isMedia) {
+        if (!cancelled) setChecked(true);
+        return;
+      }
+      // 1. Local copy on this device?
+      if (draft.mediaKey) {
+        try {
+          const blob = await idbGet(draft.mediaKey);
           if (cancelled) return;
           if (blob) {
             url = URL.createObjectURL(blob);
             setObjUrl(url);
+            setChecked(true);
+            return;
           }
+        } catch {
+          if (cancelled) return;
+        }
+      }
+      // 2. Chunked → fetch the parts and reassemble.
+      if (chunks > 1 && draft.mediaPath) {
+        try {
+          const parts: Blob[] = [];
+          for (let i = 0; i < chunks; i++) {
+            if (cancelled) return;
+            setLoadMsg(`receiving ${i + 1}/${chunks}…`);
+            const res = await fetch(publicMediaUrl(`${draft.mediaPath}.part${i}`));
+            if (!res.ok) throw new Error("missing part");
+            parts.push(await res.blob());
+          }
+          if (cancelled) return;
+          url = URL.createObjectURL(
+            new Blob(parts, { type: draft.mediaType || "application/octet-stream" })
+          );
+          setObjUrl(url);
+          setLoadMsg(null);
           setChecked(true);
-        })
-        .catch(() => {
-          if (!cancelled) setChecked(true);
-        });
-    } else {
-      setChecked(true);
-    }
+          return;
+        } catch {
+          if (!cancelled) {
+            setLoadMsg(null);
+            setChecked(true);
+          }
+          return;
+        }
+      }
+      // 3. Single cloud URL → `src` falls back to draft.mediaUrl.
+      if (!cancelled) setChecked(true);
+    })();
     return () => {
       cancelled = true;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [isMedia, draft.mediaKey]);
+  }, [isMedia, draft.mediaKey, draft.mediaChunks, draft.mediaPath, draft.mediaType]);
 
   // Release the mic if the card unmounts mid-dictation.
   useEffect(() => {
@@ -191,6 +235,7 @@ export default function CardView({ card, tilt, className = "", onSave, onUpload,
     const d = draftRef.current;
     baseRef.current = d; // optimistic: we're clean at this content now
     setBusy(true);
+    setUploadMsg("saving…");
     await onSave(card.id, {
       kind: d.kind,
       text: d.text ?? "",
@@ -202,8 +247,10 @@ export default function CardView({ card, tilt, className = "", onSave, onUpload,
       mediaName: d.mediaName,
       mediaType: d.mediaType,
       mediaSize: d.mediaSize,
+      mediaChunks: d.mediaChunks,
     });
     setBusy(false);
+    setUploadMsg("");
     setTooBig(false);
   }
 
@@ -215,11 +262,13 @@ export default function CardView({ card, tilt, className = "", onSave, onUpload,
   }
 
   async function attach(file: File) {
-    setTooBig(file.size > MAX_SYNC_BYTES);
+    setTooBig(file.size > CHUNK_CEILING);
     setBusy(true);
-    const m = await onUpload(file);
+    setUploadMsg("preparing…");
+    const m = await onUpload(file, (msg) => setUploadMsg(msg));
     if (m) patch(m);
     setBusy(false);
+    setUploadMsg("");
   }
   function takeFiles(files: FileList | null) {
     const f = files && files[0];
@@ -239,6 +288,7 @@ export default function CardView({ card, tilt, className = "", onSave, onUpload,
       mediaName: undefined,
       mediaType: undefined,
       mediaSize: undefined,
+      mediaChunks: undefined,
     });
   }
 
@@ -315,6 +365,7 @@ export default function CardView({ card, tilt, className = "", onSave, onUpload,
     ? "text-[15px] leading-[27px] pt-[27px] pl-[60px] pr-6"
     : "text-[13px] leading-[21px] pt-[21px] px-4";
 
+  const loadingLabel = <span className="media-loading">{loadMsg || "loading…"}</span>;
   const mediaPlaceholder = draft.mediaName ? (
     <span className="media-missing">{draft.mediaName} — not synced yet</span>
   ) : (
@@ -330,7 +381,7 @@ export default function CardView({ card, tilt, className = "", onSave, onUpload,
         ) : checked ? (
           mediaPlaceholder
         ) : (
-          <span className="media-loading">loading…</span>
+          loadingLabel
         ))}
       {draft.kind === "video" &&
         (src ? (
@@ -338,7 +389,7 @@ export default function CardView({ card, tilt, className = "", onSave, onUpload,
         ) : checked ? (
           mediaPlaceholder
         ) : (
-          <span className="media-loading">loading…</span>
+          loadingLabel
         ))}
       {draft.kind === "file" &&
         (src ? (
@@ -364,7 +415,7 @@ export default function CardView({ card, tilt, className = "", onSave, onUpload,
             </span>
           </div>
         ) : (
-          <span className="media-loading">loading…</span>
+          loadingLabel
         ))}
     </div>
   );
@@ -479,7 +530,7 @@ export default function CardView({ card, tilt, className = "", onSave, onUpload,
 
       {tooBig && (
         <div className="media-note">
-          kept on this device — too big to sync yet (we’re working on it)
+          over 500 MB — kept on this device only (too large for free sync)
         </div>
       )}
 
@@ -522,12 +573,12 @@ export default function CardView({ card, tilt, className = "", onSave, onUpload,
         <div className="card-bar-right">
           {dirty ? (
             <>
-              {busy && <span className="edit-busy">working…</span>}
+              {busy && <span className="edit-busy">{uploadMsg || "working…"}</span>}
               <button type="button" className="bar-btn" onClick={revert} disabled={busy} title="Discard unsaved changes">
                 ↺ revert
               </button>
               <button type="button" className="scratch-btn bar-save" onClick={save} disabled={busy}>
-                {busy ? "saving…" : "save"}
+                {busy ? "…" : "save"}
               </button>
             </>
           ) : (
