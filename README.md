@@ -18,6 +18,30 @@
 
 ---
 
+## 📱 Get it on your phone in 2 minutes
+
+**No app store. No account to create. No download.** It's a web page that installs like an app.
+
+**On your phone:**
+
+1. Open **[scratch-ellovee-s-projects.vercel.app](https://scratch-ellovee-s-projects.vercel.app)** — or just point your camera at this code:
+
+<p align="center"><img src="docs/app-qr.svg" width="150" alt="Scan to open Scratch Pad on your phone"></p>
+
+2. Tap your browser's menu and choose **"Add to Home Screen."**
+   *(iPhone: use **Safari**, tap the **Share** box at the bottom. Android: use **Chrome**, tap the **⋮** menu.)*
+3. Done — a **Scratch Pad** icon is now on your home screen. Tap it like any other app.
+
+**To link it with your laptop (or a friend's phone):**
+
+4. Open the same link there too (and "Add to Home Screen" there as well, if you like).
+5. On each device, tap **connect**, type your email, and enter the code it emails you.
+   *(Just once per device — you stay signed in after that.)*
+
+That's the whole setup. Now anything you put on a card and **Save** shows up on your other devices in a couple of seconds. ✨
+
+---
+
 ## The problem
 
 You snap a photo on your phone and need it on your laptop. Or you want to hand a note — a video, a file — to a friend standing right next to you. Today that means emailing it to yourself, signing into somebody's cloud, hunting for a cable, or installing one more app that wants your contacts.
@@ -39,15 +63,6 @@ Everything saves the moment you write it, right on the device, and mirrors to th
 - ▦ **QR share** — hand any card to anyone with a scannable code; they get a clean, read-only page. No login.
 - 📱 **It's an app** — add it to your home screen and it runs full-screen with its own icon.
 - ⚡ **Local-first** — instant, works offline, catches up when you're back.
-
-## Use it in 30 seconds
-
-1. Open **[the app](https://scratch-ellovee-s-projects.vercel.app)** on your phone *and* your laptop.
-2. Tap **connect**, enter your email, and type the code it sends. (Once per device — you stay signed in.)
-3. Write something, drop in a photo, hit **save**. Watch it land on the other screen.
-4. Use your browser's **Add to Home Screen** to turn it into a real app.
-
-That's the whole setup. No accounts to manage, no settings to wrangle.
 
 ## Privacy, honestly
 
