@@ -845,4 +845,187 @@
     outline: 2px solid rgba(168, 68, 46, 0.45);
     outline-offset: -4px;
   }
+
+  /* ── Library loading overlay (shown during big uploads) ──────────── */
+  .load-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(18, 9, 2, 0.66);
+    backdrop-filter: blur(2px);
+  }
+  .load-card {
+    position: relative;
+    width: 100%;
+    max-width: 380px;
+    padding: 26px 22px 24px;
+    text-align: center;
+    color: var(--ink);
+    background-color: var(--manila);
+    border: 2px solid var(--ink);
+    border-radius: 7px 5px 8px 6px;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+  }
+  .otto-svg {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .otto {
+    animation: otto-bob 3s ease-in-out infinite;
+  }
+  @keyframes otto-bob {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-5px);
+    }
+  }
+  .otto-arms .arm {
+    transform-box: fill-box;
+    transform-origin: top center;
+    animation: arm-wiggle 2.2s ease-in-out infinite;
+  }
+  .otto-arms .a2,
+  .otto-arms .a4 {
+    animation-delay: 0.3s;
+  }
+  .otto-arms .a3 {
+    animation-delay: 0.6s;
+  }
+  @keyframes arm-wiggle {
+    0%,
+    100% {
+      transform: rotate(-5deg);
+    }
+    50% {
+      transform: rotate(5deg);
+    }
+  }
+  .otto-pupils {
+    animation: pupil-scan 2s ease-in-out infinite;
+  }
+  @keyframes pupil-scan {
+    0%,
+    100% {
+      transform: translateX(-3px);
+    }
+    50% {
+      transform: translateX(3px);
+    }
+  }
+  .toss {
+    transform-box: fill-box;
+    opacity: 0;
+    animation: toss 1.95s ease-in infinite;
+  }
+  .toss2 {
+    animation-delay: 0.65s;
+  }
+  .toss3 {
+    animation-delay: 1.3s;
+  }
+  @keyframes toss {
+    0% {
+      transform: translate(58px, 120px) rotate(-8deg);
+      opacity: 0;
+    }
+    12% {
+      opacity: 1;
+    }
+    50% {
+      transform: translate(128px, 90px) rotate(70deg);
+      opacity: 1;
+    }
+    88% {
+      opacity: 1;
+    }
+    100% {
+      transform: translate(198px, 122px) rotate(150deg);
+      opacity: 0;
+    }
+  }
+  .load-status {
+    margin-top: 10px;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+  .load-flavor {
+    margin-top: 3px;
+    min-height: 16px;
+    font-size: 11px;
+    font-style: italic;
+    opacity: 0.6;
+  }
+  .load-bar {
+    margin-top: 14px;
+    height: 10px;
+    overflow: hidden;
+    background: rgba(60, 45, 25, 0.16);
+    border: 1px solid rgba(60, 45, 25, 0.4);
+    border-radius: 5px;
+  }
+  .load-bar-fill {
+    height: 100%;
+    background: var(--stamp-red);
+    border-radius: 5px;
+    transition: width 0.3s ease;
+  }
+  .load-bar.is-indeterminate .load-bar-fill {
+    width: 40%;
+    animation: bar-slide 1.3s ease-in-out infinite;
+  }
+  @keyframes bar-slide {
+    0% {
+      margin-left: -42%;
+    }
+    100% {
+      margin-left: 100%;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .otto,
+    .otto-arms .arm,
+    .otto-pupils,
+    .toss,
+    .load-bar.is-indeterminate .load-bar-fill {
+      animation: none;
+    }
+    .toss {
+      opacity: 0;
+    }
+  }
+
+  /* ── Phone: readable text + finger-friendly buttons ──────────────── */
+  @media (max-width: 640px) {
+    .card.is-big textarea {
+      font-size: 16px;
+    }
+    .card.is-small textarea {
+      font-size: 15px;
+    }
+    .caption {
+      font-size: 14px;
+    }
+    .bar-btn {
+      font-size: 12px;
+      padding: 8px 11px;
+      gap: 5px;
+    }
+    .card-bar {
+      gap: 7px;
+      padding: 8px 9px;
+    }
+    .card-stamp {
+      font-size: 10px;
+    }
+  }
 }

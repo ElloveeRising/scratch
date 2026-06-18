@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import CardView, { type Card } from "./components/CardView";
 import Connect from "./components/Connect";
 import ShareModal from "./components/ShareModal";
+import LoadingOverlay from "./components/LoadingOverlay";
 import { idbDel, idbPut } from "./lib/idb";
 import { supabase } from "./lib/supabase";
 
@@ -125,6 +126,11 @@ export default function Home() {
   const [saving, setSaving] = useState(false);
   const [showConnect, setShowConnect] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [upload, setUpload] = useState<{ active: boolean; msg: string; fraction: number | null }>({
+    active: false,
+    msg: "",
+    fraction: null,
+  });
   const userIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -291,93 +297,105 @@ export default function Home() {
   // large images; splits anything still over the per-file cap into sub-cap
   // chunks (reassembled on the other device, full quality). Keeps a fast local
   // copy. Does NOT touch the board — the draft only becomes real on Save.
-  // `onProgress` reports steps for the UI.
+  // Heavy files drive the library loading overlay; `onProgress` also feeds the
+  // card's own little status line.
   const onUpload = useCallback(
     async (file: File, onProgress?: (msg: string) => void): Promise<Partial<Card>> => {
-      const key = newKey();
-      const isImage = file.type.startsWith("image/");
-      const isVideo = file.type.startsWith("video/");
-      const kind: "image" | "video" | "file" = isImage ? "image" : isVideo ? "video" : "file";
-
-      // 1. Compress large images (near-lossless) before storing/uploading.
-      let blob: Blob = file;
-      let mediaType = file.type || "application/octet-stream";
-      if (isImage && file.size > IMG_COMPRESS_OVER) {
-        onProgress?.("optimizing image…");
-        const c = await compressImage(file);
-        if (c) {
-          blob = c.blob;
-          mediaType = c.type;
-        }
-      }
-
-      // 2. Keep a fast local copy on THIS device.
-      try {
-        await idbPut(key, blob);
-      } catch {
-        /* local store failed; the cloud copy below may still succeed */
-      }
-
-      const base: Partial<Card> = {
-        kind,
-        mediaKey: key,
-        mediaName: file.name,
-        mediaType,
-        mediaSize: blob.size,
+      const heavy = file.size > 8 * 1024 * 1024; // show the overlay for big jobs only
+      const report = (msg: string, fraction: number | null = null) => {
+        onProgress?.(msg);
+        if (heavy) setUpload({ active: true, msg, fraction });
       };
+      if (heavy) setUpload({ active: true, msg: "preparing…", fraction: null });
+      try {
+        const key = newKey();
+        const isImage = file.type.startsWith("image/");
+        const isVideo = file.type.startsWith("video/");
+        const kind: "image" | "video" | "file" = isImage ? "image" : isVideo ? "video" : "file";
 
-      const sb = supabase;
-      const uid = userIdRef.current;
-      if (!sb || !uid) return base; // signed out → local only
-
-      // 3a. Fits in one piece → single upload (the common case).
-      if (blob.size <= MAX_SYNC_BYTES) {
-        try {
-          onProgress?.("uploading…");
-          const ext =
-            (file.name.split(".").pop() || "bin").replace(/[^a-zA-Z0-9]/g, "").slice(0, 8) || "bin";
-          const path = `${uid}/${key}.${ext}`;
-          const { error } = await sb.storage
-            .from("media")
-            .upload(path, blob, { contentType: mediaType, upsert: true });
-          if (!error) {
-            return {
-              ...base,
-              mediaPath: path,
-              mediaUrl: sb.storage.from("media").getPublicUrl(path).data.publicUrl,
-            };
+        // 1. Compress large images (near-lossless) before storing/uploading.
+        let blob: Blob = file;
+        let mediaType = file.type || "application/octet-stream";
+        if (isImage && file.size > IMG_COMPRESS_OVER) {
+          report("optimizing image…");
+          const c = await compressImage(file);
+          if (c) {
+            blob = c.blob;
+            mediaType = c.type;
           }
-        } catch {
-          /* fall through to local-only */
         }
-        return base;
-      }
 
-      // 3b. Over the cap but within reason → split into sub-cap chunks.
-      if (blob.size <= CHUNK_CEILING) {
+        // 2. Keep a fast local copy on THIS device.
         try {
-          const count = Math.ceil(blob.size / CHUNK_BYTES);
-          const chunkBase = `${uid}/${key}`;
-          for (let i = 0; i < count; i++) {
-            onProgress?.(`uploading ${i + 1}/${count}…`);
-            const part = blob.slice(i * CHUNK_BYTES, (i + 1) * CHUNK_BYTES);
+          await idbPut(key, blob);
+        } catch {
+          /* local store failed; the cloud copy below may still succeed */
+        }
+
+        const base: Partial<Card> = {
+          kind,
+          mediaKey: key,
+          mediaName: file.name,
+          mediaType,
+          mediaSize: blob.size,
+        };
+
+        const sb = supabase;
+        const uid = userIdRef.current;
+        if (!sb || !uid) return base; // signed out → local only
+
+        // 3a. Fits in one piece → single upload (the common case).
+        if (blob.size <= MAX_SYNC_BYTES) {
+          try {
+            report("uploading…");
+            const ext =
+              (file.name.split(".").pop() || "bin").replace(/[^a-zA-Z0-9]/g, "").slice(0, 8) || "bin";
+            const path = `${uid}/${key}.${ext}`;
             const { error } = await sb.storage
               .from("media")
-              .upload(`${chunkBase}.part${i}`, part, {
-                contentType: "application/octet-stream",
-                upsert: true,
-              });
-            if (error) throw error;
+              .upload(path, blob, { contentType: mediaType, upsert: true });
+            if (!error) {
+              return {
+                ...base,
+                mediaPath: path,
+                mediaUrl: sb.storage.from("media").getPublicUrl(path).data.publicUrl,
+              };
+            }
+          } catch {
+            /* fall through to local-only */
           }
-          return { ...base, mediaPath: chunkBase, mediaChunks: count };
-        } catch {
-          /* a chunk failed — keep on-device only */
+          return base;
         }
-        return base;
-      }
 
-      // 3c. Beyond what the free tier can hold — keep on this device only.
-      return base;
+        // 3b. Over the cap but within reason → split into sub-cap chunks.
+        if (blob.size <= CHUNK_CEILING) {
+          try {
+            const count = Math.ceil(blob.size / CHUNK_BYTES);
+            const chunkBase = `${uid}/${key}`;
+            for (let i = 0; i < count; i++) {
+              report(`uploading ${i + 1}/${count}…`, i / count);
+              const part = blob.slice(i * CHUNK_BYTES, (i + 1) * CHUNK_BYTES);
+              const { error } = await sb.storage
+                .from("media")
+                .upload(`${chunkBase}.part${i}`, part, {
+                  contentType: "application/octet-stream",
+                  upsert: true,
+                });
+              if (error) throw error;
+            }
+            report("almost done…", 1);
+            return { ...base, mediaPath: chunkBase, mediaChunks: count };
+          } catch {
+            /* a chunk failed — keep on-device only */
+          }
+          return base;
+        }
+
+        // 3c. Beyond what the free tier can hold — keep on this device only.
+        return base;
+      } finally {
+        if (heavy) setUpload({ active: false, msg: "", fraction: null });
+      }
     },
     []
   );
@@ -491,12 +509,12 @@ export default function Home() {
       </header>
 
       {/* ── Board: one big card + three small cards ──────────────────── */}
-      <main className="flex-1 overflow-hidden p-4 sm:p-6">
-        <div className="h-full grid gap-4 grid-cols-1 grid-rows-[2fr_1fr_1fr_1fr] sm:grid-cols-3 sm:grid-rows-3">
+      <main className="flex-1 overflow-y-auto sm:overflow-hidden p-3 sm:p-6">
+        <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-3 sm:grid-rows-3 sm:h-full">
           <CardView
             card={big}
             tilt={TILT[big.id] ?? { card: 0, stamp: -4 }}
-            className="sm:col-span-2 sm:row-span-3"
+            className="min-h-[400px] sm:min-h-0 sm:col-span-2 sm:row-span-3"
             onSave={onSave}
             onUpload={onUpload}
             onShare={() => setSharing(true)}
@@ -506,7 +524,7 @@ export default function Home() {
               key={c.id}
               card={c}
               tilt={TILT[c.id] ?? { card: 0, stamp: -4 }}
-              className="sm:col-span-1"
+              className="min-h-[240px] sm:min-h-0 sm:col-span-1"
               onSave={onSave}
               onUpload={onUpload}
             />
@@ -516,6 +534,7 @@ export default function Home() {
 
       {showConnect && <Connect onClose={() => setShowConnect(false)} />}
       {sharing && <ShareModal card={big} onClose={() => setSharing(false)} />}
+      {upload.active && <LoadingOverlay msg={upload.msg} fraction={upload.fraction} />}
     </div>
   );
 }
