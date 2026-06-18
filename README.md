@@ -64,6 +64,8 @@ Scratch Pad is **free, and always will be** — no subscriptions, no upsells, no
 
 - ☕ **Buy Me a Coffee** — [buymeacoffee.com/aSchellCompany](https://buymeacoffee.com/aSchellCompany)
 - 💵 **Cash App** — `$Aircityryan`
+- ₿ **Bitcoin** — `bc1q4q0u5f7ya3ylwg3h4sdq5yw7cgfpl4ghpu9uap`
+- ⓜ **Monero** — `4B3RLHnNS6tNeHEneTXcecTAntHknXzbLYR1yBP3yUWS9baUjdnHv4UdhjRubaSexuPGEGmJ4QKpxHdrHNjLMuZpHf15gUt`
 
 No pressure, ever. Using it and telling a friend is support too. 🤎
 
