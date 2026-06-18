@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640" font-family="'Courier New', 'Courier Prime', monospace">
+  <defs>
+    <radialGradient id="vig" cx="50%" cy="42%" r="78%">
+      <stop offset="58%" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.42"/>
+    </radialGradient>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#120a03" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+
+  <!-- walnut desk -->
+  <rect width="1280" height="640" fill="#6e4c2c"/>
+  <g fill="#ffffff" fill-opacity="0.03">
+    <rect x="0" y="0" width="300" height="640"/>
+    <rect x="620" y="0" width="320" height="640"/>
+  </g>
+  <g stroke="#000000" stroke-opacity="0.18" stroke-width="2">
+    <line x1="300" y1="0" x2="300" y2="640"/>
+    <line x1="620" y1="0" x2="620" y2="640"/>
+    <line x1="940" y1="0" x2="940" y2="640"/>
+  </g>
+  <rect width="1280" height="640" fill="url(#vig)"/>
+
+  <!-- the index card -->
+  <g transform="rotate(-1.4 640 320)" filter="url(#sh)">
+    <rect x="150" y="86" width="980" height="468" rx="10" fill="#ecdca6" stroke="#3c2d19" stroke-opacity="0.28"/>
+
+    <!-- ruled lines -->
+    <g stroke="#4a371e" stroke-opacity="0.12" stroke-width="2">
+      <line x1="170" y1="150" x2="1110" y2="150"/>
+      <line x1="170" y1="195" x2="1110" y2="195"/>
+      <line x1="170" y1="240" x2="1110" y2="240"/>
+      <line x1="170" y1="285" x2="1110" y2="285"/>
+      <line x1="170" y1="330" x2="1110" y2="330"/>
+      <line x1="170" y1="375" x2="1110" y2="375"/>
+      <line x1="170" y1="420" x2="1110" y2="420"/>
+      <line x1="170" y1="465" x2="1110" y2="465"/>
+      <line x1="170" y1="510" x2="1110" y2="510"/>
+    </g>
+    <!-- red left margin -->
+    <line x1="262" y1="86" x2="262" y2="554" stroke="#a8442e" stroke-opacity="0.4" stroke-width="2"/>
+
+    <!-- red catalog stamp -->
+    <g transform="rotate(4 1040 150)">
+      <rect x="978" y="124" width="124" height="48" rx="3" fill="none" stroke="#a8442e" stroke-opacity="0.7" stroke-width="2.5"/>
+      <text x="1040" y="155" fill="#a8442e" fill-opacity="0.9" font-size="20" font-weight="700" letter-spacing="4" text-anchor="middle">SP-01</text>
+    </g>
+
+    <!-- wordmark -->
+    <text x="300" y="232" fill="#1c1b1a" font-size="88" font-weight="700" letter-spacing="2">SCRATCH PAD</text>
+
+    <!-- problem statement -->
+    <text x="302" y="298" fill="#1c1b1a" fill-opacity="0.82" font-size="22">Share your files, between your devices, with your friends.</text>
+    <text x="302" y="350" fill="#a8442e" font-size="30" font-weight="700" letter-spacing="2">Fast. Easy. Private. Free.</text>
+    <text x="302" y="396" fill="#1c1b1a" fill-opacity="0.55" font-size="20">No ads · no tracking · no data mining · set it up once and go.</text>
+
+    <!-- small QR nod to the share feature -->
+    <g transform="translate(958 408)" fill="#1c1b1a">
+      <!-- three finder squares -->
+      <g>
+        <rect x="0" y="0" width="36" height="36"/><rect x="6" y="6" width="24" height="24" fill="#ecdca6"/><rect x="12" y="12" width="12" height="12"/>
+        <rect x="60" y="0" width="36" height="36"/><rect x="66" y="6" width="24" height="24" fill="#ecdca6"/><rect x="72" y="12" width="12" height="12"/>
+        <rect x="0" y="60" width="36" height="36"/><rect x="6" y="66" width="24" height="24" fill="#ecdca6"/><rect x="12" y="72" width="12" height="12"/>
+      </g>
+      <!-- scattered modules -->
+      <rect x="48" y="12" width="12" height="12"/>
+      <rect x="48" y="36" width="12" height="12"/>
+      <rect x="72" y="48" width="12" height="12"/>
+      <rect x="60" y="60" width="12" height="12"/>
+      <rect x="84" y="60" width="12" height="12"/>
+      <rect x="48" y="72" width="12" height="12"/>
+      <rect x="72" y="84" width="12" height="12"/>
+      <rect x="84" y="36" width="12" height="12"/>
+    </g>
+    <text x="1006" y="530" fill="#1c1b1a" fill-opacity="0.5" font-size="15" letter-spacing="2" text-anchor="middle">SCAN TO SHARE</text>
+  </g>
+</svg>

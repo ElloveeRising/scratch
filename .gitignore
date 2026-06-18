@@ -27,3 +27,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# internal dev notes / scratch (keep out of the public repo)
+HANDOFF.md
+_*.mjs
