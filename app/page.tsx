@@ -10,9 +10,10 @@ import { supabase } from "./lib/supabase";
 
 const STORAGE_KEY = "scratch:board:v1";
 
-// Bump on each deploy during this phase — shown tiny in the header so you can
-// tell at a glance whether the device loaded the latest build (vs a cached one).
-const VERSION = "0.6";
+// Bump on each deploy during this phase — shown in the header so you can tell
+// whether the device loaded the latest build (vs a cached one). The width
+// readout next to it reports the browser's CSS viewport width (diagnostic).
+const VERSION = "0.7";
 
 // Fixed board: one big "main" card plus three small cards.
 const DEFAULT_CARDS: Card[] = [
@@ -135,11 +136,20 @@ export default function Home() {
     msg: "",
     fraction: null,
   });
+  const [vw, setVw] = useState(0); // CSS viewport width — shown in header for diagnostics
   const userIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     cardsRef.current = cards;
   }, [cards]);
+
+  // Track the CSS viewport width (diagnostic readout in the header).
+  useEffect(() => {
+    const upd = () => setVw(window.innerWidth);
+    upd();
+    window.addEventListener("resize", upd);
+    return () => window.removeEventListener("resize", upd);
+  }, []);
 
   // Write the current board to this device's local storage (instant + offline).
   const persistNow = useCallback((board?: Card[]) => {
@@ -493,7 +503,7 @@ export default function Home() {
       <header className="flex-none flex items-center justify-between px-6 py-3 border-b border-black/25 text-manila">
         <span className="flex items-baseline gap-2">
           <span className="text-xs font-bold tracking-[0.35em]">SCRATCH PAD</span>
-          <span className="text-[9px] opacity-40 tracking-wider">v{VERSION}</span>
+          <span className="text-[10px] opacity-60 tracking-wider">v{VERSION} · {vw || "…"}w</span>
         </span>
         <div className="flex items-center gap-3">
           {userEmail ? (
@@ -516,12 +526,12 @@ export default function Home() {
       </header>
 
       {/* ── Board: one big card + three small cards ──────────────────── */}
-      <main className="flex-1 overflow-y-auto sm:overflow-hidden p-3 sm:p-6">
-        <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-3 sm:grid-rows-3 sm:h-full">
+      <main className="flex-1 overflow-y-auto lg:overflow-hidden p-3 lg:p-6">
+        <div className="grid gap-3 lg:gap-4 grid-cols-1 lg:grid-cols-3 lg:grid-rows-3 lg:h-full">
           <CardView
             card={big}
             tilt={TILT[big.id] ?? { card: 0, stamp: -4 }}
-            className="min-h-[400px] sm:min-h-0 sm:col-span-2 sm:row-span-3"
+            className="min-h-[400px] lg:min-h-0 lg:col-span-2 lg:row-span-3"
             onSave={onSave}
             onUpload={onUpload}
             onShare={() => setSharing(true)}
@@ -531,7 +541,7 @@ export default function Home() {
               key={c.id}
               card={c}
               tilt={TILT[c.id] ?? { card: 0, stamp: -4 }}
-              className="min-h-[240px] sm:min-h-0 sm:col-span-1"
+              className="min-h-[240px] lg:min-h-0 lg:col-span-1"
               onSave={onSave}
               onUpload={onUpload}
             />

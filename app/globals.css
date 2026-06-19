@@ -1017,7 +1017,7 @@
      was shoving the Save button off-screen and breaking scroll. `!important`
      beats both the Tailwind text-[..] utilities (a later @layer) and the
      .card.is-big .caption rule, which the plain rule could not. */
-  @media (max-width: 640px) {
+  @media (max-width: 1023px) {
     .card textarea {
       font-size: 16px !important;
     }
