@@ -28,8 +28,13 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
   themeColor: "#6e4c2c",
   viewportFit: "cover",
+  // When the on-screen keyboard opens, shrink the layout to the space above it
+  // (instead of letting the keyboard overlay/hide the Save button on phones).
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({

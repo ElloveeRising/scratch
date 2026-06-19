@@ -10,6 +10,10 @@ import { supabase } from "./lib/supabase";
 
 const STORAGE_KEY = "scratch:board:v1";
 
+// Bump on each deploy during this phase — shown tiny in the header so you can
+// tell at a glance whether the device loaded the latest build (vs a cached one).
+const VERSION = "0.6";
+
 // Fixed board: one big "main" card plus three small cards.
 const DEFAULT_CARDS: Card[] = [
   { id: "main", label: "MAIN", size: "big", kind: "text", text: "" },
@@ -487,7 +491,10 @@ export default function Home() {
     <div className="desk h-screen flex flex-col text-ink overflow-hidden">
       {/* ── Status bar ───────────────────────────────────────────────── */}
       <header className="flex-none flex items-center justify-between px-6 py-3 border-b border-black/25 text-manila">
-        <span className="text-xs font-bold tracking-[0.35em]">SCRATCH PAD</span>
+        <span className="flex items-baseline gap-2">
+          <span className="text-xs font-bold tracking-[0.35em]">SCRATCH PAD</span>
+          <span className="text-[9px] opacity-40 tracking-wider">v{VERSION}</span>
+        </span>
         <div className="flex items-center gap-3">
           {userEmail ? (
             <>
