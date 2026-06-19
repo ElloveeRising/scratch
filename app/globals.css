@@ -854,6 +854,14 @@
     outline-offset: -4px;
   }
 
+  /* Spiral-notebook binding across the top of the MAIN card */
+  .nb-spiral {
+    flex: none;
+    display: block;
+    line-height: 0;
+    margin-bottom: 2px;
+  }
+
   /* ── Library loading overlay (shown during big uploads) ──────────── */
   .load-overlay {
     position: fixed;

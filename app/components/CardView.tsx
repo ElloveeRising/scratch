@@ -382,6 +382,21 @@ export default function CardView({ card, tilt, className = "", onSave, onUpload,
         }}
       />
 
+      {/* Spiral binding across the top of the MAIN card (the "notebook"). */}
+      {big && (
+        <div className="nb-spiral" aria-hidden="true">
+          <svg width="100%" height="20" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <pattern id="nbcoils" x="0" y="0" width="26" height="20" patternUnits="userSpaceOnUse">
+                <ellipse cx="13" cy="9" rx="5" ry="8" fill="none" stroke="#6e5c3f" strokeWidth="3" />
+                <circle cx="13" cy="15" r="2.3" fill="#cdb784" />
+              </pattern>
+            </defs>
+            <rect width="100%" height="20" fill="url(#nbcoils)" />
+          </svg>
+        </div>
+      )}
+
       {/* ── Content (always editable) ─────────────────────────────── */}
       {draft.kind === "text" && (
         <textarea

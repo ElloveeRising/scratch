@@ -526,12 +526,14 @@ export default function Home() {
       </header>
 
       {/* ── Board: one big card + three small cards ──────────────────── */}
-      <main className="flex-1 overflow-y-auto lg:overflow-hidden p-3 lg:p-6">
-        <div className="grid gap-3 lg:gap-4 grid-cols-1 lg:grid-cols-3 lg:grid-rows-3 lg:h-full">
+      {/* Two-column "board": notebook (MAIN) on the left, the 3 small cards
+          stacked on the right — same shape on phone and desktop. */}
+      <main className="flex-1 overflow-hidden p-3 sm:p-6">
+        <div className="grid h-full gap-3 sm:gap-4 grid-cols-[1.15fr_1fr] lg:grid-cols-[2fr_1fr] grid-rows-3">
           <CardView
             card={big}
             tilt={TILT[big.id] ?? { card: 0, stamp: -4 }}
-            className="min-h-[400px] lg:min-h-0 lg:col-span-2 lg:row-span-3"
+            className="row-span-3 min-h-0"
             onSave={onSave}
             onUpload={onUpload}
             onShare={() => setSharing(true)}
@@ -541,7 +543,7 @@ export default function Home() {
               key={c.id}
               card={c}
               tilt={TILT[c.id] ?? { card: 0, stamp: -4 }}
-              className="min-h-[240px] lg:min-h-0 lg:col-span-1"
+              className="min-h-0"
               onSave={onSave}
               onUpload={onUpload}
             />
