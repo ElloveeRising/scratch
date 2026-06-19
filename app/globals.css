@@ -125,14 +125,15 @@
 
   /* The big card also gets the classic red left-margin rule */
   .card.is-big {
+    --margin-x: 47px;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23p)' opacity='0.05'/%3E%3C/svg%3E"),
       linear-gradient(
         to right,
         transparent 0,
-        transparent 47px,
-        var(--margin-red) 47px,
-        var(--margin-red) 48px,
-        transparent 48px
+        transparent var(--margin-x),
+        var(--margin-red) var(--margin-x),
+        var(--margin-red) calc(var(--margin-x) + 1px),
+        transparent calc(var(--margin-x) + 1px)
       ),
       repeating-linear-gradient(
         to bottom,
@@ -1028,6 +1029,15 @@
   @media (max-width: 1023px) {
     .card textarea {
       font-size: 16px !important;
+    }
+    /* Pull the notebook's red margin + body padding in so text isn't cramped
+       in the narrow two-column phone layout (the body textarea only). */
+    .card.is-big {
+      --margin-x: 26px;
+    }
+    .card.is-big textarea:not(.caption) {
+      padding-left: 34px !important;
+      padding-right: 14px !important;
     }
     .connect-input {
       font-size: 16px;
