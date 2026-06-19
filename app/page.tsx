@@ -315,12 +315,12 @@ export default function Home() {
   // card's own little status line.
   const onUpload = useCallback(
     async (file: File, onProgress?: (msg: string) => void): Promise<Partial<Card>> => {
-      const heavy = file.size > 8 * 1024 * 1024; // show the overlay for big jobs only
+      const startedAt = Date.now();
       const report = (msg: string, fraction: number | null = null) => {
         onProgress?.(msg);
-        if (heavy) setUpload({ active: true, msg, fraction });
+        setUpload({ active: true, msg, fraction });
       };
-      if (heavy) setUpload({ active: true, msg: "preparing…", fraction: null });
+      setUpload({ active: true, msg: "preparing…", fraction: null });
       try {
         const key = newKey();
         const isImage = file.type.startsWith("image/");
@@ -408,7 +408,12 @@ export default function Home() {
         // 3c. Beyond what the free tier can hold — keep on this device only.
         return base;
       } finally {
-        if (heavy) setUpload({ active: false, msg: "", fraction: null });
+        // Keep the librarian on screen for at least a beat so quick uploads
+        // (small photos, files) don't flash — Otto gets his moment for anything.
+        const remaining = Math.max(0, 650 - (Date.now() - startedAt));
+        const clear = () => setUpload({ active: false, msg: "", fraction: null });
+        if (remaining === 0) clear();
+        else setTimeout(clear, remaining);
       }
     },
     []
